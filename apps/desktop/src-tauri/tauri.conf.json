@@ -1,0 +1,36 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Laplace",
+  "version": "0.1.0",
+  "identifier": "br.laplace.desktop",
+  "build": {
+    "beforeDevCommand": "pnpm prepare:sidecar && pnpm dev:web",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "pnpm prepare:sidecar && pnpm build:web",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Laplace",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 440,
+        "minHeight": 480,
+        "backgroundColor": "#151719"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'",
+      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://127.0.0.1:1420; object-src 'none'; base-uri 'none'",
+      "capabilities": ["desktop"]
+    }
+  },
+  "bundle": {
+    "active": false,
+    "icon": ["icons/icon.ico"],
+    "externalBin": ["generated/laplace-node"],
+    "resources": { "generated/service.cjs": "sidecar/service.cjs" }
+  }
+}

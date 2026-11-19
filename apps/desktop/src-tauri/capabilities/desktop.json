@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop",
+  "description": "Interface local do Laplace",
+  "windows": ["main"],
+  "permissions": [
+    "allow-service-health",
+    "allow-workspace-add-local",
+    "allow-project-inspect"
+  ]
+}
