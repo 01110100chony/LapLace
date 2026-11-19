@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
+import { realpathSync } from "node:fs";
 import {
   cp,
   mkdtemp,
@@ -476,6 +477,8 @@ test(
   async (t) => {
     const env = await fixture(t);
     const root = await env.repository("Legado");
+    // D04 persisted the canonical Git root, including on-disk casing on Windows.
+    const legacyRoot = realpathSync.native(root);
     const moved = join(env.root, "Legado movido");
     const projectId = "b".repeat(64);
     await mkdir(env.dataDir);
@@ -490,7 +493,7 @@ test(
       `);
       legacy
         .prepare("INSERT INTO projects VALUES (?, ?, ?)")
-        .run(projectId, root, "Legado");
+        .run(projectId, legacyRoot, "Legado");
       legacy
         .prepare("INSERT INTO workspace_state VALUES (1, ?)")
         .run(projectId);
@@ -500,10 +503,10 @@ test(
 
     await rename(root, moved);
     const service = env.start();
-    assert.equal(
-      (await service.request("workspace.list")).selectedProjectId,
-      projectId,
-    );
+    assert.deepEqual(await service.request("workspace.list"), {
+      projects: [{ id: projectId, name: "Legado", root: legacyRoot }],
+      selectedProjectId: projectId,
+    });
     assert.equal(
       (await service.request("project.select", { projectId })).cached,
       null,
@@ -513,16 +516,16 @@ test(
       { message: "project_identity_unknown" },
     );
     await rename(moved, root);
-    assert.equal(
-      (await service.request("project.inspect", { projectId })).id,
-      projectId,
-    );
+    const inspected = await service.request("project.inspect", { projectId });
+    assert.equal(inspected.id, projectId);
+    assert.equal(inspected.root, legacyRoot);
     await rename(root, moved);
-    assert.equal(
-      (await service.request("project.relocate", { projectId, path: moved }))
-        .id,
+    const relocated = await service.request("project.relocate", {
       projectId,
-    );
+      path: moved,
+    });
+    assert.equal(relocated.id, projectId);
+    assert.equal(relocated.root, realpathSync.native(moved));
     await service.close();
   },
 );
