@@ -1,4 +1,9 @@
-import type { GitSummary, Health, ProjectRecord } from "@laplace/contracts";
+import type {
+  GitObservation,
+  GitSummary,
+  Health,
+  ProjectRecord,
+} from "@laplace/contracts";
 
 export type ServiceStatus =
   | { state: "loading" }
@@ -8,11 +13,11 @@ export type ServiceStatus =
 export type ProjectStatus =
   | { state: "loading" }
   | { state: "ready" }
-  | { state: "error"; message: string };
+  | { state: "error"; message: string; canRelocate: boolean };
 
 type HomeProps = {
   projects: ProjectRecord[];
-  summaries: Readonly<Record<string, GitSummary>>;
+  summaries: Readonly<Record<string, GitObservation | undefined>>;
   recent: ProjectRecord | undefined;
   service: ServiceStatus;
   add: () => void;
@@ -42,7 +47,11 @@ export function Home({
           <h1>Área de trabalho</h1>
         </div>
         {recent && (
-          <button className="button" onClick={add}>
+          <button
+            className="button"
+            disabled={service.state !== "ready"}
+            onClick={add}
+          >
             <span aria-hidden="true">+</span> Adicionar projeto
           </button>
         )}
@@ -66,7 +75,10 @@ export function Home({
               {recentSummary ? (
                 <>
                   <code>{branchLabel(recentSummary)}</code> ·{" "}
-                  {recentSummary.head ? "Repositório Git" : "Sem commits"}
+                  {recentSummary.head
+                    ? "Última leitura Git em"
+                    : "Sem commits na leitura de"}{" "}
+                  <ObservedTime summary={recentSummary} />
                 </>
               ) : recent ? (
                 recent.root
@@ -115,7 +127,7 @@ export function Home({
                       </span>
                       {summaries[project.id] ? (
                         <code className="tag">
-                          {branchLabel(summaries[project.id]!)}
+                          {branchLabel(summaries[project.id]!)} · cache
                         </code>
                       ) : (
                         <span aria-hidden="true" />
@@ -190,17 +202,28 @@ const observedFormat = new Intl.DateTimeFormat("pt-BR", {
   timeStyle: "medium",
 });
 
+function ObservedTime({ summary }: { summary: GitSummary }) {
+  return (
+    <time dateTime={summary.observedAt}>
+      {observedFormat.format(new Date(summary.observedAt))}
+    </time>
+  );
+}
+
 export function ProjectView({
   project,
   summary,
   status,
   refresh,
+  relocate,
 }: {
   project: ProjectRecord;
-  summary: GitSummary | undefined;
+  summary: GitObservation | undefined;
   status: ProjectStatus;
   refresh: () => void;
+  relocate: () => void;
 }) {
+  const loading = status.state === "loading";
   return (
     <>
       <header className="headline project-headline">
@@ -213,25 +236,31 @@ export function ProjectView({
         </div>
         <button
           className="button"
-          disabled={status.state === "loading"}
-          onClick={refresh}
+          aria-disabled={loading || undefined}
+          onClick={() => {
+            if (!loading) refresh();
+          }}
         >
           Atualizar
         </button>
       </header>
       <div className="project-view-label">Visão geral</div>
-      {status.state === "loading" && (
-        <p className="panel loading" role="status">
+      {loading && (
+        <p className="panel loading inspection-status" role="status">
           <span aria-hidden="true" /> Consultando o Git…
         </p>
       )}
       {status.state === "error" && (
-        <div className="error-banner" role="alert">
-          <strong>{status.message}</strong>
-          {summary && <p>Exibindo a última leitura do repositório.</p>}
+        <div className="error-banner">
+          <strong role="alert">{status.message}</strong>
+          {status.canRelocate && (
+            <button className="text-button" onClick={relocate}>
+              Relocalizar pasta
+            </button>
+          )}
         </div>
       )}
-      {summary && status.state !== "loading" && (
+      {summary && (
         <>
           <div className="project-grid">
             <section className="panel" aria-labelledby="repo-heading">
@@ -281,11 +310,12 @@ export function ProjectView({
               )}
             </section>
           </div>
-          <p className="observed">
-            Leitura em{" "}
-            <time dateTime={summary.observedAt}>
-              {observedFormat.format(new Date(summary.observedAt))}
-            </time>
+          <p className="observed" role="status">
+            {status.state === "ready"
+              ? "Leitura atual do Git"
+              : "Última leitura do Git em cache"}
+            {" · "}
+            <ObservedTime summary={summary} />
           </p>
         </>
       )}

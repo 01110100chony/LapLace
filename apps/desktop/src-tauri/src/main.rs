@@ -25,12 +25,21 @@ async fn workspace_add_local(
     if !ipc::valid_id(&id) {
         return Err(ErrorCode::InvalidRequest.into());
     }
+    let Some(path) = choose_folder(&window, "Selecionar repositório Git").await? else {
+        return Ok(None);
+    };
+    Ok(Some(
+        sidecar.request(id, Operation::Add { path: &path }).await?,
+    ))
+}
+
+async fn choose_folder(window: &WebviewWindow, title: &str) -> Result<Option<String>, ErrorCode> {
     let (sender, receiver) = tokio::sync::oneshot::channel();
     window
         .dialog()
         .file()
-        .set_title("Selecionar repositório Git")
-        .set_parent(&window)
+        .set_title(title)
+        .set_parent(window)
         .pick_folder(move |selection| {
             let _ = sender.send(selection);
         });
@@ -40,8 +49,27 @@ async fn workspace_add_local(
     let path = selection
         .into_path()
         .map_err(|_| ErrorCode::InvalidFolder)?;
-    let path = path.to_str().ok_or(ErrorCode::InvalidFolder)?;
-    Ok(Some(sidecar.request(id, Operation::Add { path }).await?))
+    Ok(Some(
+        path.into_os_string()
+            .into_string()
+            .map_err(|_| ErrorCode::InvalidFolder)?,
+    ))
+}
+
+#[tauri::command]
+async fn project_select(
+    id: String,
+    project_id: String,
+    sidecar: State<'_, Sidecar>,
+) -> Result<Response, Fault> {
+    Ok(sidecar
+        .request(
+            id,
+            Operation::Select {
+                project_id: &project_id,
+            },
+        )
+        .await?)
 }
 
 #[tauri::command]
@@ -58,6 +86,32 @@ async fn project_inspect(
             },
         )
         .await?)
+}
+
+#[tauri::command]
+async fn project_relocate(
+    id: String,
+    project_id: String,
+    window: WebviewWindow,
+    sidecar: State<'_, Sidecar>,
+) -> Result<Option<Response>, Fault> {
+    if !ipc::valid_id(&id) || !ipc::valid_project_id(&project_id) {
+        return Err(ErrorCode::InvalidRequest.into());
+    }
+    let Some(path) = choose_folder(&window, "Relocalizar repositório Git").await? else {
+        return Ok(None);
+    };
+    Ok(Some(
+        sidecar
+            .request(
+                id,
+                Operation::Relocate {
+                    project_id: &project_id,
+                    path: &path,
+                },
+            )
+            .await?,
+    ))
 }
 
 fn main() {
@@ -78,7 +132,9 @@ fn main() {
             service_health,
             workspace_list,
             workspace_add_local,
-            project_inspect
+            project_select,
+            project_inspect,
+            project_relocate
         ])
         .build(tauri::generate_context!())
         .expect("falha ao inicializar a janela do Laplace");

@@ -25,7 +25,8 @@ function withCatalog<T>(
   try {
     catalog ??= openCatalog(dataDir);
     return operation(catalog);
-  } catch {
+  } catch (error) {
+    if (error instanceof GitError) throw error;
     throw new CatalogError();
   }
 }
@@ -60,19 +61,29 @@ async function respond(line: string): Promise<Response> {
       return { ...envelope, operation: request.operation, ok: true, data };
     }
     if (request.operation === "workspace.addLocal") {
-      const summary = await inspectRepository(request.path, {
+      const inspection = await inspectRepository(request.path, {
         signal: exit.signal,
       });
-      const project = withCatalog((store) => store.add(summary));
-      const data = { ...summary, ...project };
+      const data = withCatalog((store) => store.add(inspection));
       return { ...envelope, operation: request.operation, ok: true, data };
     }
-
-    const project = withCatalog((store) => store.select(request.projectId));
-    if (!project) throw new GitError("project_unavailable");
-    const summary = await inspectRepository(project.root, {
+    if (request.operation === "project.select") {
+      const data = withCatalog((store) => store.select(request.projectId));
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    const project = withCatalog((store) => store.lookup(request.projectId));
+    if (request.operation === "project.relocate") {
+      if (!project.identity) throw new GitError("project_identity_unknown");
+      const inspection = await inspectRepository(request.path, {
+        signal: exit.signal,
+      });
+      const data = withCatalog((store) => store.record(project, inspection));
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    const inspection = await inspectRepository(project.root, {
       signal: exit.signal,
       expectedRoot: project.root,
+      expectedIdentity: project.identity ?? undefined,
     }).catch((error: unknown) => {
       if (
         error instanceof GitError &&
@@ -82,8 +93,8 @@ async function respond(line: string): Promise<Response> {
       }
       throw error;
     });
-    const data = { ...summary, ...project };
-    return { ...envelope, operation: request.operation, ok: true, data };
+    const data = withCatalog((store) => store.record(project, inspection));
+    return { ...envelope, operation: "project.inspect", ok: true, data };
   } catch (error) {
     const code =
       error instanceof GitError

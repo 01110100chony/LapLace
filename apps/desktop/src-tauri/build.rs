@@ -3,7 +3,9 @@ fn main() {
         "service_health",
         "workspace_list",
         "workspace_add_local",
+        "project_select",
         "project_inspect",
+        "project_relocate",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(commands))
         .expect("falha ao configurar o host Tauri");

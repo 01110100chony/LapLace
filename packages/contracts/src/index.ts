@@ -1,4 +1,4 @@
-export const protocolVersion = 1;
+export const protocolVersion = 2;
 export const maxIpcBytes = 192 * 1024;
 
 export const errorCodes = [
@@ -10,6 +10,9 @@ export const errorCodes = [
   "git_failed",
   "git_timeout",
   "project_unavailable",
+  "project_identity_mismatch",
+  "project_identity_unknown",
+  "project_already_registered",
   "catalog_unavailable",
   "dialog_failed",
   "service_unavailable",
@@ -37,7 +40,14 @@ export type GitSummary = {
   };
   observedAt: string;
 };
-export type Project = ProjectRecord & GitSummary;
+export const gitSource = "git.status";
+export const gitSummaryVersion = 1;
+export type GitObservation = GitSummary & {
+  source: typeof gitSource;
+  summaryVersion: typeof gitSummaryVersion;
+};
+export type Project = ProjectRecord & GitObservation;
+export type SelectedProject = ProjectRecord & { cached: GitObservation | null };
 export type Catalog = {
   projects: ProjectRecord[];
   selectedProjectId: string | null;
@@ -47,7 +57,9 @@ export type Results = {
   health: Health;
   "workspace.list": Catalog;
   "workspace.addLocal": Project;
+  "project.select": SelectedProject;
   "project.inspect": Project;
+  "project.relocate": Project;
 };
 export type Operation = keyof Results;
 type Envelope = { version: typeof protocolVersion; id: string };
@@ -56,7 +68,8 @@ export type Request = Envelope &
     | { operation: "health" }
     | { operation: "workspace.list" }
     | { operation: "workspace.addLocal"; path: string }
-    | { operation: "project.inspect"; projectId: string }
+    | { operation: "project.select" | "project.inspect"; projectId: string }
+    | { operation: "project.relocate"; projectId: string; path: string }
   );
 export type Response<K extends Operation = Operation> =
   | { [P in K]: Envelope & { operation: P; ok: true; data: Results[P] } }[K]
@@ -90,21 +103,32 @@ export function parseRequest(value: unknown): Request | undefined {
   if (value.operation === "health") return { ...envelope, operation: "health" };
   if (value.operation === "workspace.list")
     return { ...envelope, operation: "workspace.list" };
-  if (value.operation === "project.inspect" && isProjectId(value.projectId)) {
+  if (
+    (value.operation === "project.select" ||
+      value.operation === "project.inspect") &&
+    isProjectId(value.projectId)
+  ) {
     return {
       ...envelope,
-      operation: "project.inspect",
+      operation: value.operation,
       projectId: value.projectId,
     };
   }
   if (
-    value.operation === "workspace.addLocal" &&
     typeof value.path === "string" &&
     value.path.length > 0 &&
     value.path.length <= 32_767 &&
     !value.path.includes("\0")
   ) {
-    return { ...envelope, operation: value.operation, path: value.path };
+    if (value.operation === "workspace.addLocal")
+      return { ...envelope, operation: value.operation, path: value.path };
+    if (value.operation === "project.relocate" && isProjectId(value.projectId))
+      return {
+        ...envelope,
+        operation: value.operation,
+        projectId: value.projectId,
+        path: value.path,
+      };
   }
 }
 
@@ -127,10 +151,11 @@ function isProjectRecord(
   );
 }
 
-function isProject(value: unknown): value is Project {
+export function isGitObservation(value: unknown): value is GitObservation {
   return (
     isRecord(value) &&
-    isProjectRecord(value) &&
+    value.source === gitSource &&
+    value.summaryVersion === gitSummaryVersion &&
     (value.branch === null || nonempty(value.branch)) &&
     (value.head === null ||
       (typeof value.head === "string" &&
@@ -172,5 +197,8 @@ export function isResponse<K extends Operation>(
   if (value.ok !== true || value.operation !== operation) return false;
   if (operation === "health") return isHealth(value.data);
   if (operation === "workspace.list") return isCatalog(value.data);
-  return isProject(value.data);
+  if (!isProjectRecord(value.data)) return false;
+  if (operation === "project.select")
+    return value.data.cached === null || isGitObservation(value.data.cached);
+  return isGitObservation(value.data);
 }

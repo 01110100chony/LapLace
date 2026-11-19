@@ -4,11 +4,17 @@ import { errorMessage } from "./ipc";
 
 type Props = {
   dialogRef: RefObject<HTMLDialogElement | null>;
+  mode: "import" | "relocate";
   choose: () => Promise<Project | null>;
-  onImported: (project: Project) => void;
+  onSelected: (project: Project) => void;
 };
 
-export function ImportDialog({ dialogRef, choose, onImported }: Props) {
+export function ProjectFolderDialog({
+  dialogRef,
+  mode,
+  choose,
+  onSelected,
+}: Props) {
   const headingId = useId();
   const descriptionId = useId();
   const generation = useRef(0);
@@ -27,7 +33,7 @@ export function ImportDialog({ dialogRef, choose, onImported }: Props) {
         project
       ) {
         dialogRef.current.close();
-        onImported(project);
+        onSelected(project);
       }
     } catch (error) {
       if (generation.current === current && dialogRef.current?.open) {
@@ -56,7 +62,9 @@ export function ImportDialog({ dialogRef, choose, onImported }: Props) {
       onClose={reset}
     >
       <div className="dialog-heading">
-        <h2 id={headingId}>Adicionar projeto</h2>
+        <h2 id={headingId}>
+          {mode === "import" ? "Adicionar projeto" : "Relocalizar projeto"}
+        </h2>
         <button
           className="icon-button"
           disabled={busy}
@@ -67,13 +75,15 @@ export function ImportDialog({ dialogRef, choose, onImported }: Props) {
         </button>
       </div>
       <p id={descriptionId}>
-        Escolha uma pasta de um repositório Git no seu computador.
+        {mode === "import"
+          ? "Escolha uma pasta de um repositório Git no seu computador."
+          : "Selecione o mesmo checkout Git na nova localização. O projeto mantém seu nome e registro."}
       </p>
       <p className={failure ? "dialog-error" : "visually-hidden"} role="alert">
         {failure}
       </p>
       {busy && (
-        <p className="loading">
+        <p className="loading" role="status">
           <span aria-hidden="true" /> Aguardando seleção ou leitura do Git…
         </p>
       )}
@@ -88,8 +98,10 @@ export function ImportDialog({ dialogRef, choose, onImported }: Props) {
         <button
           className="button primary"
           autoFocus
-          disabled={busy}
-          onClick={() => void select()}
+          aria-disabled={busy || undefined}
+          onClick={() => {
+            if (!busy) void select();
+          }}
         >
           Selecionar pasta
         </button>

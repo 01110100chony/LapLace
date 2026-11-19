@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createLatestRequest } from "../src/workspace.ts";
+import type { GitObservation, ProjectRecord } from "@laplace/contracts";
+import { createLatestRequest, createProjectLoader } from "../src/workspace.ts";
 
 function pending<T>() {
   let resolve!: (value: T) => void;
@@ -36,4 +37,56 @@ test("voltar à Home invalida erros e respostas da visão anterior", async () =>
   latest.invalidate();
   previous.reject(new Error("atrasado"));
   await request;
+});
+
+test("cache, Git e seleção persistida continuam associados ao projeto certo em uma alternância rápida", async () => {
+  const observation: GitObservation = {
+    source: "git.status",
+    summaryVersion: 1,
+    observedAt: "2026-01-01T12:00:00.000Z",
+    branch: "main",
+    head: null,
+    changes: { staged: 0, unstaged: 0, untracked: 0, conflicted: 0 },
+  };
+  const a: ProjectRecord = { id: "a", name: "Alpha", root: "/alpha" };
+  const b: ProjectRecord = { id: "b", name: "Beta", root: "/beta" };
+  const projects = new Map([
+    [a.id, a],
+    [b.id, b],
+  ]);
+  const firstRead = pending<typeof observation>();
+  const firstStarted = pending<void>();
+  const selected: string[] = [];
+  const visible: string[] = [];
+  const loader = createProjectLoader({
+    select: async (id) => {
+      selected.push(id);
+      return { ...projects.get(id)!, cached: observation };
+    },
+    inspect: async (id) => {
+      if (id === a.id) firstStarted.resolve();
+      return {
+        ...projects.get(id)!,
+        ...(id === a.id
+          ? await firstRead.promise
+          : { ...observation, branch: "beta-atual" }),
+      };
+    },
+  });
+  function open(id: string) {
+    return loader.open(
+      id,
+      (value) => visible.push(`${value.id}:cache`),
+      (value) => visible.push(`${value.id}:${value.branch}`),
+      () => assert.fail("falha inesperada"),
+    );
+  }
+
+  const first = open(a.id);
+  await firstStarted.promise;
+  await open(b.id);
+  firstRead.resolve({ ...observation, branch: "alpha-atrasado" });
+  await first;
+  assert.deepEqual(visible, ["a:cache", "b:cache", "b:beta-atual"]);
+  assert.deepEqual(selected, [a.id, b.id]);
 });

@@ -12,7 +12,7 @@ use tokio::{
     time::timeout,
 };
 
-const VERSION: u8 = 1;
+const VERSION: u8 = 2;
 const MAX_BYTES: usize = 192 * 1024;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(18);
 const STOP_TIMEOUT: Duration = Duration::from_millis(500);
@@ -28,6 +28,9 @@ pub enum ErrorCode {
     GitFailed,
     GitTimeout,
     ProjectUnavailable,
+    ProjectIdentityMismatch,
+    ProjectIdentityUnknown,
+    ProjectAlreadyRegistered,
     CatalogUnavailable,
     DialogFailed,
     ServiceUnavailable,
@@ -89,10 +92,33 @@ struct Catalog {
 struct Project {
     #[serde(flatten)]
     record: ProjectRecord,
+    #[serde(flatten)]
+    summary: GitObservation,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SelectedProject {
+    #[serde(flatten)]
+    record: ProjectRecord,
+    cached: Option<GitObservation>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GitObservation {
     branch: Option<String>,
     head: Option<String>,
     changes: Changes,
     observed_at: String,
+    source: String,
+    summary_version: u8,
+}
+
+impl GitObservation {
+    fn valid(&self) -> bool {
+        self.source == "git.status" && self.summary_version == 1
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -104,8 +130,12 @@ enum Payload {
     List(Catalog),
     #[serde(rename = "workspace.addLocal")]
     Add(Project),
+    #[serde(rename = "project.select")]
+    Select(SelectedProject),
     #[serde(rename = "project.inspect")]
     Inspect(Project),
+    #[serde(rename = "project.relocate")]
+    Relocate(Project),
 }
 
 impl Payload {
@@ -114,7 +144,9 @@ impl Payload {
             Self::Health(_) => "health",
             Self::List(_) => "workspace.list",
             Self::Add(_) => "workspace.addLocal",
+            Self::Select(_) => "project.select",
             Self::Inspect(_) => "project.inspect",
+            Self::Relocate(_) => "project.relocate",
         }
     }
 
@@ -128,7 +160,12 @@ impl Payload {
                         .as_ref()
                         .is_none_or(|id| catalog.projects.iter().any(|project| &project.id == id))
             }
-            Self::Add(project) | Self::Inspect(project) => project.record.valid(),
+            Self::Select(project) => {
+                project.record.valid() && project.cached.as_ref().is_none_or(GitObservation::valid)
+            }
+            Self::Add(project) | Self::Inspect(project) | Self::Relocate(project) => {
+                project.record.valid() && project.summary.valid()
+            }
         }
     }
 }
@@ -163,12 +200,13 @@ impl Response {
                 Body::Success { ok: true, payload } => {
                     payload.operation() == operation.name()
                         && payload.valid()
-                        && match (operation, payload) {
-                            (Operation::Inspect { project_id }, Payload::Inspect(project)) => {
-                                project.record.id == project_id
+                        && operation.project_id().is_none_or(|id| match payload {
+                            Payload::Select(project) => project.record.id == id,
+                            Payload::Inspect(project) | Payload::Relocate(project) => {
+                                project.record.id == id
                             }
-                            _ => true,
-                        }
+                            _ => false,
+                        })
                 }
                 Body::Failure { ok: false, .. } => true,
                 _ => false,
@@ -193,25 +231,47 @@ pub enum Operation<'a> {
     List,
     #[serde(rename = "workspace.addLocal")]
     Add { path: &'a str },
+    #[serde(rename = "project.select")]
+    Select {
+        #[serde(rename = "projectId")]
+        project_id: &'a str,
+    },
     #[serde(rename = "project.inspect")]
     Inspect {
         #[serde(rename = "projectId")]
         project_id: &'a str,
     },
+    #[serde(rename = "project.relocate")]
+    Relocate {
+        #[serde(rename = "projectId")]
+        project_id: &'a str,
+        path: &'a str,
+    },
 }
 
-impl Operation<'_> {
+impl<'a> Operation<'a> {
     fn name(self) -> &'static str {
         match self {
             Self::Health => "health",
             Self::List => "workspace.list",
             Self::Add { .. } => "workspace.addLocal",
+            Self::Select { .. } => "project.select",
             Self::Inspect { .. } => "project.inspect",
+            Self::Relocate { .. } => "project.relocate",
+        }
+    }
+
+    fn project_id(self) -> Option<&'a str> {
+        match self {
+            Self::Select { project_id }
+            | Self::Inspect { project_id }
+            | Self::Relocate { project_id, .. } => Some(project_id),
+            _ => None,
         }
     }
 }
 
-fn valid_project_id(id: &str) -> bool {
+pub fn valid_project_id(id: &str) -> bool {
     id.len() == 64
         && id
             .bytes()
@@ -329,10 +389,11 @@ impl Sidecar {
         if !valid_id(&id) {
             return Err(ErrorCode::InvalidRequest);
         }
-        if let Operation::Inspect { project_id } = operation {
-            if !valid_project_id(project_id) {
-                return Err(ErrorCode::InvalidRequest);
-            }
+        if operation
+            .project_id()
+            .is_some_and(|id| !valid_project_id(id))
+        {
+            return Err(ErrorCode::InvalidRequest);
         }
 
         let started = Instant::now();

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { protocolVersion } from "@laplace/contracts";
 import { createDesktopClient } from "../src/ipc.ts";
 
 test("correlaciona operação e ID e devolve a resposta do health check", async () => {
@@ -7,7 +8,7 @@ test("correlaciona operação e ID e devolve a resposta do health check", async 
     assert.equal(command, "service_health");
     assert.ok(id);
     return {
-      version: 1,
+      version: protocolVersion,
       id,
       operation: "health",
       ok: true,
@@ -26,7 +27,7 @@ test("apresenta falhas estruturadas do host e do serviço", async () => {
   });
   await assert.rejects(hostFailure.health(), { code: "service_unavailable" });
   const serviceFailure = createDesktopClient(async (_, { id }) => ({
-    version: 1,
+    version: protocolVersion,
     id,
     ok: false,
     error: { code: "not_repository" },
@@ -39,10 +40,10 @@ test("rejeita respostas inválidas, de outro pedido ou de outra operação", asy
     { id: "outro-pedido" },
     { operation: "project.inspect" },
     { data: { version: 1 } },
-    { version: 2 },
+    { version: protocolVersion - 1 },
   ]) {
     const desktop = createDesktopClient(async (_, { id }) => ({
-      version: 1,
+      version: protocolVersion,
       id,
       operation: "health",
       ok: true,
@@ -58,4 +59,26 @@ test("expira IPC que não responde e aceita cancelamento do diálogo", async () 
   await assert.rejects(timeout.health(), { code: "ipc_timeout" });
   const cancel = createDesktopClient(async () => null);
   assert.equal(await cancel.addLocal(), null);
+  assert.equal(await cancel.relocate("a".repeat(64)), null);
+});
+
+test("rejeita dados de seleção de outro projeto mesmo com ID de IPC válido", async () => {
+  const desktop = createDesktopClient(async (command, { id }) => {
+    assert.equal(command, "project_select");
+    return {
+      version: protocolVersion,
+      id,
+      operation: "project.select",
+      ok: true,
+      data: {
+        id: "b".repeat(64),
+        name: "Outro",
+        root: "C:\\Outro",
+        cached: null,
+      },
+    };
+  });
+  await assert.rejects(desktop.select("a".repeat(64)), {
+    code: "invalid_response",
+  });
 });

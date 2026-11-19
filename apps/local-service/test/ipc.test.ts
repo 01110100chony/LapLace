@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
 import {
+  cp,
   mkdtemp,
   mkdir,
   rename,
@@ -124,12 +125,12 @@ test(
     const env = await fixture(t);
     const service = env.start();
     const bad = await service.exchange({
-      version: 1,
+      version: protocolVersion,
       id: "bad-1",
       operation: "shell",
     });
     assert.deepEqual(bad, {
-      version: 1,
+      version: protocolVersion,
       id: "bad-1",
       ok: false,
       error: { code: "invalid_request" },
@@ -148,7 +149,7 @@ test(
     try {
       assert.equal(
         database.prepare("PRAGMA user_version").get()?.user_version,
-        1,
+        2,
       );
     } finally {
       database.close();
@@ -207,7 +208,8 @@ test(
     const a = await first.request("workspace.addLocal", { path: alpha });
     const b = await first.request("workspace.addLocal", { path: beta });
     assert.notEqual(a.id, b.id);
-    await first.request("project.inspect", { projectId: a.id });
+    await first.request("project.select", { projectId: a.id });
+    await first.request("project.inspect", { projectId: b.id });
     const saved = await first.request("workspace.list");
     assert.deepEqual(saved, {
       projects: [a, b].map(({ id, name, root }) => ({ id, name, root })),
@@ -224,12 +226,24 @@ test(
     const second = env.start();
     const restored = await second.request("workspace.list");
     assert.deepEqual(restored, saved);
+    const { cached } = await second.request("project.select", {
+      projectId: a.id,
+    });
+    assert.equal(cached?.source, "git.status");
+    assert.equal(cached.summaryVersion, 1);
+    assert.equal(cached.head, a.head);
+    assert.equal(cached.changes.untracked, 0);
     const fresh = await second.request("project.inspect", {
       projectId: restored.selectedProjectId!,
     });
     assert.equal(fresh.branch, "depois-do-reinicio");
     assert.equal(fresh.head, newHead);
     assert.equal(fresh.changes.untracked, 1);
+    assert.equal(
+      (await second.request("project.select", { projectId: a.id })).cached
+        ?.head,
+      newHead,
+    );
     await second.close();
 
     const third = env.start();
@@ -262,13 +276,13 @@ test(
     assert.deepEqual(await second.request("workspace.list"), saved);
 
     const invalid = await second.exchange({
-      version: 1,
+      version: protocolVersion,
       id: "path-only",
       operation: "project.inspect",
       path: available,
     });
     assert.deepEqual(invalid, {
-      version: 1,
+      version: protocolVersion,
       id: "path-only",
       ok: false,
       error: { code: "invalid_request" },
@@ -280,7 +294,7 @@ test(
     assert.deepEqual(await second.request("workspace.list"), saved);
 
     assert.equal(
-      (await second.request("project.inspect", { projectId: a.id })).id,
+      (await second.request("project.select", { projectId: a.id })).id,
       a.id,
     );
     assert.equal(
@@ -288,12 +302,228 @@ test(
       a.id,
     );
     await rename(moved, missing);
+    await second.request("project.select", { projectId: b.id });
     assert.equal(
       (await second.request("project.inspect", { projectId: b.id })).id,
       b.id,
     );
     assert.deepEqual(await second.request("workspace.list"), saved);
     await second.close();
+  },
+);
+
+test(
+  "rejeita cache inválido ou de outra origem, versão e localização e o recompõe pelo Git",
+  { timeout: 20_000 },
+  async (t) => {
+    const env = await fixture(t);
+    const root = await env.repository("Repositório com cache");
+    const service = env.start();
+    const added = await service.request("workspace.addLocal", { path: root });
+    const projectId = added.id;
+    const project = await service.request("project.select", { projectId });
+    assert.ok(project.cached);
+    const database = new DatabaseSync(env.database, { timeout: 2_000 });
+    try {
+      const update = database.prepare(
+        "UPDATE git_inspections SET payload = ? WHERE project_id = ?",
+      );
+      for (const invalid of [
+        "{",
+        JSON.stringify({ ...project.cached, source: "outra" }),
+        JSON.stringify({ ...project.cached, summaryVersion: 99 }),
+        JSON.stringify({ ...project.cached, observedAt: "sem data" }),
+      ]) {
+        update.run(invalid, projectId);
+        assert.equal(
+          (await service.request("project.select", { projectId })).cached,
+          null,
+        );
+      }
+      update.run(JSON.stringify(project.cached), projectId);
+      database
+        .prepare("UPDATE git_inspections SET root = ? WHERE project_id = ?")
+        .run(env.root, projectId);
+      assert.equal(
+        (await service.request("project.select", { projectId })).cached,
+        null,
+      );
+    } finally {
+      database.close();
+    }
+    await writeFile(join(root, "externo.txt"), "Novo");
+    assert.equal(
+      (await service.request("project.inspect", { projectId })).changes
+        .untracked,
+      1,
+    );
+    assert.equal(
+      (await service.request("project.select", { projectId })).cached?.changes
+        .untracked,
+      1,
+    );
+    await service.close();
+  },
+);
+
+test(
+  "relocaliza o mesmo checkout e preserva o catálogo e o cache ao rejeitar destinos incorretos",
+  { timeout: 25_000 },
+  async (t) => {
+    const env = await fixture(t);
+    const root = await env.repository("Projeto original");
+    const other = await env.repository("Projeto diferente");
+    const copy = join(env.root, "Cópia com o mesmo HEAD");
+    const relocated = join(env.root, "Projeto relocalizado");
+    const empty = join(env.root, "Pasta sem Git");
+    git(
+      root,
+      "commit",
+      "--quiet",
+      "--allow-empty",
+      "-m",
+      "Commit compartilhado",
+    );
+    await cp(root, copy, { recursive: true });
+    await mkdir(empty);
+    const service = env.start();
+    await service.request("workspace.addLocal", { path: other });
+    const original = await service.request("workspace.addLocal", {
+      path: root,
+    });
+    const projectId = original.id;
+    const before = await service.request("workspace.list");
+    const cached = await service.request("project.select", { projectId });
+    await rename(root, relocated);
+    await service.close();
+
+    const reopened = env.start();
+    assert.deepEqual(await reopened.request("workspace.list"), before);
+    await assert.rejects(reopened.request("project.inspect", { projectId }), {
+      message: "project_unavailable",
+    });
+    await assert.rejects(
+      reopened.request("project.relocate", { projectId, path: empty }),
+      { message: "not_repository" },
+    );
+    await assert.rejects(
+      reopened.request("project.relocate", { projectId, path: copy }),
+      { message: "project_identity_mismatch" },
+    );
+    await assert.rejects(
+      reopened.request("project.relocate", { projectId, path: other }),
+      { message: "project_already_registered" },
+    );
+    await assert.rejects(
+      reopened.request("workspace.addLocal", { path: relocated }),
+      { message: "project_already_registered" },
+    );
+
+    await rename(copy, root);
+    await assert.rejects(reopened.request("project.inspect", { projectId }), {
+      message: "project_identity_mismatch",
+    });
+    await assert.rejects(
+      reopened.request("workspace.addLocal", { path: root }),
+      { message: "project_identity_mismatch" },
+    );
+    assert.deepEqual(await reopened.request("workspace.list"), before);
+    assert.deepEqual(
+      await reopened.request("project.select", { projectId }),
+      cached,
+    );
+
+    await writeFile(join(relocated, "mudança"), "Modificado fora do Laplace");
+    const corrected = await reopened.request("project.relocate", {
+      projectId,
+      path: relocated,
+    });
+    assert.equal(corrected.id, projectId);
+    assert.equal(corrected.name, original.name);
+    assert.equal(corrected.head, original.head);
+    assert.equal(corrected.changes.untracked, 1);
+    assert.notEqual(corrected.root, original.root);
+    assert.equal(
+      (await reopened.request("workspace.addLocal", { path: relocated })).id,
+      projectId,
+    );
+    await reopened.close();
+
+    const again = env.start();
+    const after = await again.request("workspace.list");
+    assert.equal(after.selectedProjectId, projectId);
+    assert.equal(after.projects.length, 2);
+    assert.equal(
+      after.projects.find(({ id }) => id === projectId)?.root,
+      corrected.root,
+    );
+    assert.equal(
+      (await again.request("project.select", { projectId })).cached?.changes
+        .untracked,
+      1,
+    );
+    assert.equal(
+      (await again.request("project.inspect", { projectId })).head,
+      original.head,
+    );
+    await again.close();
+  },
+);
+
+test(
+  "migra um catálogo D04 e só habilita relocalização após verificar o checkout na raiz cadastrada",
+  { timeout: 20_000 },
+  async (t) => {
+    const env = await fixture(t);
+    const root = await env.repository("Legado");
+    const moved = join(env.root, "Legado movido");
+    const projectId = "b".repeat(64);
+    await mkdir(env.dataDir);
+    const legacy = new DatabaseSync(env.database);
+    try {
+      legacy.exec(`
+        CREATE TABLE projects (id TEXT PRIMARY KEY NOT NULL, root TEXT NOT NULL UNIQUE, name TEXT NOT NULL) STRICT;
+        CREATE TABLE workspace_state (
+          id INTEGER PRIMARY KEY CHECK (id = 1), selected_project_id TEXT REFERENCES projects(id)
+        ) STRICT;
+        PRAGMA user_version = 1;
+      `);
+      legacy
+        .prepare("INSERT INTO projects VALUES (?, ?, ?)")
+        .run(projectId, root, "Legado");
+      legacy
+        .prepare("INSERT INTO workspace_state VALUES (1, ?)")
+        .run(projectId);
+    } finally {
+      legacy.close();
+    }
+
+    await rename(root, moved);
+    const service = env.start();
+    assert.equal(
+      (await service.request("workspace.list")).selectedProjectId,
+      projectId,
+    );
+    assert.equal(
+      (await service.request("project.select", { projectId })).cached,
+      null,
+    );
+    await assert.rejects(
+      service.request("project.relocate", { projectId, path: moved }),
+      { message: "project_identity_unknown" },
+    );
+    await rename(moved, root);
+    assert.equal(
+      (await service.request("project.inspect", { projectId })).id,
+      projectId,
+    );
+    await rename(root, moved);
+    assert.equal(
+      (await service.request("project.relocate", { projectId, path: moved }))
+        .id,
+      projectId,
+    );
+    await service.close();
   },
 );
 
@@ -310,7 +540,7 @@ test(
 
     const database = new DatabaseSync(env.database);
     try {
-      database.exec("PRAGMA user_version = 2");
+      database.exec("PRAGMA user_version = 3");
       const second = env.start();
       await assert.rejects(second.request("workspace.list"), {
         message: "catalog_unavailable",
@@ -318,9 +548,9 @@ test(
       await second.close();
       assert.equal(
         database.prepare("PRAGMA user_version").get()?.user_version,
-        2,
+        3,
       );
-      database.exec("PRAGMA user_version = 1");
+      database.exec("PRAGMA user_version = 2");
     } finally {
       database.close();
     }

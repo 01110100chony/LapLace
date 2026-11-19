@@ -2,7 +2,15 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import type { Catalog, ProjectRecord } from "@laplace/contracts";
+import {
+  isGitObservation,
+  type Catalog,
+  type GitObservation,
+  type Project,
+  type ProjectRecord,
+  type SelectedProject,
+} from "@laplace/contracts";
+import { GitError, type RepositoryInspection } from "./git.ts";
 
 const migrations = [
   `CREATE TABLE projects (
@@ -15,7 +23,33 @@ const migrations = [
      selected_project_id TEXT REFERENCES projects(id)
    ) STRICT;
    INSERT INTO workspace_state (id) VALUES (1);`,
+  `ALTER TABLE projects ADD COLUMN git_identity TEXT;
+   CREATE UNIQUE INDEX projects_git_identity ON projects (git_identity);
+   CREATE TABLE git_inspections (
+     project_id TEXT PRIMARY KEY NOT NULL REFERENCES projects(id),
+     root TEXT NOT NULL,
+     git_identity TEXT NOT NULL,
+     observed_at TEXT NOT NULL,
+     payload TEXT NOT NULL
+   ) STRICT;`,
 ];
+
+type RegisteredProject = ProjectRecord & { identity: string | null };
+
+function readObservation(
+  payload: unknown,
+  observedAt: unknown,
+): GitObservation | null {
+  if (typeof payload !== "string") return null;
+  try {
+    const parsed: unknown = JSON.parse(payload);
+    return isGitObservation(parsed) && parsed.observedAt === observedAt
+      ? parsed
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 function writeTransaction<T>(database: DatabaseSync, write: () => T): T {
   database.exec("BEGIN IMMEDIATE");
@@ -58,18 +92,82 @@ export function openCatalog(dataDir: string) {
       ORDER BY p.rowid
     `);
     const insert = database.prepare(`
-      INSERT INTO projects (id, root, name) VALUES (?, ?, ?)
-      ON CONFLICT(root) DO NOTHING
+      INSERT INTO projects (id, root, name, git_identity) VALUES (?, ?, ?, ?)
     `);
     const byRoot = database.prepare(
-      "SELECT id, name, root FROM projects WHERE root = ?",
+      "SELECT id, name, root, git_identity AS identity FROM projects WHERE root = ?",
+    );
+    const byIdentity = database.prepare(
+      "SELECT id FROM projects WHERE git_identity = ?",
     );
     const byId = database.prepare(
-      "SELECT id, name, root FROM projects WHERE id = ?",
+      "SELECT id, name, root, git_identity AS identity FROM projects WHERE id = ?",
     );
     const setSelection = database.prepare(
       "UPDATE workspace_state SET selected_project_id = ? WHERE id = 1",
     );
+    const setLocation = database.prepare(
+      "UPDATE projects SET root = ?, git_identity = ? WHERE id = ?",
+    );
+    const cached = database.prepare(`
+      SELECT payload, observed_at FROM git_inspections
+      WHERE project_id = ? AND root = ? AND git_identity = ?
+    `);
+    const saveObservation = database.prepare(`
+      INSERT INTO git_inspections (project_id, root, git_identity, observed_at, payload)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(project_id) DO UPDATE SET
+        root = excluded.root, git_identity = excluded.git_identity,
+        observed_at = excluded.observed_at, payload = excluded.payload
+    `);
+
+    function lookup(id: string): RegisteredProject {
+      const project = byId.get(id) as RegisteredProject | undefined;
+      if (!project) throw new GitError("project_unavailable");
+      return project;
+    }
+
+    function save(
+      project: RegisteredProject,
+      inspection: RepositoryInspection,
+    ): Project {
+      const {
+        root,
+        identity,
+        branch,
+        head,
+        changes,
+        observedAt,
+        source,
+        summaryVersion,
+      } = inspection;
+      const summary = {
+        branch,
+        head,
+        changes,
+        observedAt,
+        source,
+        summaryVersion,
+      };
+      if (project.identity !== null && project.identity !== identity)
+        throw new GitError("project_identity_mismatch");
+      const owner = byIdentity.get(identity);
+      if (owner && owner.id !== project.id)
+        throw new GitError("project_already_registered");
+      if (project.root !== root || project.identity === null)
+        setLocation.run(root, identity, project.id);
+      const previous = cached.get(project.id, root, identity);
+      const valid = readObservation(previous?.payload, previous?.observed_at);
+      if (!valid || valid.observedAt <= observedAt)
+        saveObservation.run(
+          project.id,
+          root,
+          identity,
+          observedAt,
+          JSON.stringify(summary),
+        );
+      return { id: project.id, name: project.name, root, ...summary };
+    }
 
     return {
       list(): Catalog {
@@ -81,19 +179,49 @@ export function openCatalog(dataDir: string) {
           selectedProjectId: rows[0]?.selectedProjectId ?? null,
         };
       },
-      add({ name, root }: Omit<ProjectRecord, "id">): ProjectRecord {
+      add(inspection: RepositoryInspection): Project {
+        const { name, root, identity } = inspection;
         return writeTransaction(database, () => {
-          insert.run(randomBytes(32).toString("hex"), root, name);
-          const project = byRoot.get(root) as ProjectRecord;
+          const existing = byRoot.get(root) as RegisteredProject | undefined;
+          if (!existing && byIdentity.get(identity))
+            throw new GitError("project_already_registered");
+          const project = existing ?? {
+            id: randomBytes(32).toString("hex"),
+            root,
+            name,
+            identity,
+          };
+          if (!existing) insert.run(project.id, root, name, identity);
+          const result = save(project, inspection);
           setSelection.run(project.id);
-          return project;
+          return result;
         });
       },
-      select(id: string): ProjectRecord | undefined {
+      lookup,
+      select(id: string): SelectedProject {
         return writeTransaction(database, () => {
-          const project = byId.get(id) as ProjectRecord | undefined;
-          if (project) setSelection.run(project.id);
-          return project;
+          const { name, root, identity } = lookup(id);
+          setSelection.run(id);
+          const entry = cached.get(id, root, identity);
+          return {
+            id,
+            name,
+            root,
+            cached: readObservation(entry?.payload, entry?.observed_at),
+          };
+        });
+      },
+      record(
+        previous: RegisteredProject,
+        inspection: RepositoryInspection,
+      ): Project {
+        return writeTransaction(database, () => {
+          const current = lookup(previous.id);
+          if (current.root !== previous.root)
+            throw new GitError("project_unavailable");
+          if (current.root !== inspection.root && byRoot.get(inspection.root))
+            throw new GitError("project_already_registered");
+          return save(current, inspection);
         });
       },
       close() {

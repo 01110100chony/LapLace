@@ -10,7 +10,10 @@ type DesktopCommand =
   | "service_health"
   | "workspace_list"
   | "workspace_add_local"
-  | "project_inspect";
+  | "project_select"
+  | "project_inspect"
+  | "project_relocate";
+type PickerOperation = "workspace.addLocal" | "project.relocate";
 type Invoke = (
   command: DesktopCommand,
   args: Record<string, string>,
@@ -20,7 +23,9 @@ const commands: Record<Operation, DesktopCommand> = {
   health: "service_health",
   "workspace.list": "workspace_list",
   "workspace.addLocal": "workspace_add_local",
+  "project.select": "project_select",
   "project.inspect": "project_inspect",
+  "project.relocate": "project_relocate",
 };
 
 export class DesktopError extends Error {
@@ -34,9 +39,10 @@ export class DesktopError extends Error {
 
 export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
   async function request(
-    operation: "workspace.addLocal",
-  ): Promise<Results["workspace.addLocal"] | null>;
-  async function request<K extends Exclude<Operation, "workspace.addLocal">>(
+    operation: PickerOperation,
+    args?: Record<string, string>,
+  ): Promise<Results[PickerOperation] | null>;
+  async function request<K extends Exclude<Operation, PickerOperation>>(
     operation: K,
     args?: Record<string, string>,
   ): Promise<Results[K]>;
@@ -45,26 +51,32 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
     args: Record<string, string> = {},
   ): Promise<Results[K] | null> {
     const id = crypto.randomUUID();
+    const picker =
+      operation === "workspace.addLocal" || operation === "project.relocate";
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const call = invoke(commands[operation], { ...args, id });
       // The native picker may stay open as long as the user needs.
-      const response =
-        operation === "workspace.addLocal"
-          ? await call
-          : await Promise.race([
-              call,
-              new Promise<never>((_, reject) => {
-                timer = setTimeout(
-                  () => reject(new DesktopError("ipc_timeout")),
-                  deadlineMs,
-                );
-              }),
-            ]);
-      if (response === null && operation === "workspace.addLocal") return null;
+      const response = picker
+        ? await call
+        : await Promise.race([
+            call,
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(
+                () => reject(new DesktopError("ipc_timeout")),
+                deadlineMs,
+              );
+            }),
+          ]);
+      if (response === null && picker) return null;
       if (!isResponse(response, id, operation))
         throw new DesktopError("invalid_response");
       if (!response.ok) throw new DesktopError(response.error.code);
+      if (
+        args.projectId !== undefined &&
+        (!("id" in response.data) || response.data.id !== args.projectId)
+      )
+        throw new DesktopError("invalid_response");
       return response.data;
     } catch (error) {
       if (error instanceof DesktopError) throw error;
@@ -80,7 +92,9 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
     health: () => request("health"),
     list: () => request("workspace.list"),
     addLocal: () => request("workspace.addLocal"),
+    select: (projectId: string) => request("project.select", { projectId }),
     inspect: (projectId: string) => request("project.inspect", { projectId }),
+    relocate: (projectId: string) => request("project.relocate", { projectId }),
   };
 }
 
@@ -98,7 +112,13 @@ const messages: Record<ErrorCode, string> = {
   git_timeout:
     "O Git demorou para responder. Tente novamente em alguns instantes.",
   project_unavailable:
-    "A pasta Git cadastrada está indisponível. Restabeleça o acesso à pasta original e clique em Atualizar.",
+    "A pasta Git cadastrada está indisponível. Relocalize a pasta ou restabeleça o acesso e clique em Atualizar.",
+  project_identity_mismatch:
+    "Esta pasta pertence a outro checkout Git. Selecione a pasta original do projeto.",
+  project_identity_unknown:
+    "A identidade do checkout ainda não pôde ser confirmada. Restabeleça o acesso à pasta cadastrada e clique em Atualizar.",
+  project_already_registered:
+    "Esse checkout já está cadastrado. Abra o projeto correspondente na barra lateral para consultar ou relocalizar sua pasta.",
   catalog_unavailable:
     "O catálogo local está indisponível. Verifique o acesso aos dados do aplicativo e tente novamente.",
   dialog_failed: "Não foi possível abrir o seletor de pastas. Tente novamente.",

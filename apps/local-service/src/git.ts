@@ -3,7 +3,14 @@ import { access, stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { basename, delimiter, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
-import type { ErrorCode, GitSummary, ProjectRecord } from "@laplace/contracts";
+import {
+  gitSource,
+  gitSummaryVersion,
+  type ErrorCode,
+  type GitObservation,
+  type GitSummary,
+  type ProjectRecord,
+} from "@laplace/contracts";
 
 const exec = promisify(execFile);
 // Native resolution also returns the on-disk casing on Windows.
@@ -24,7 +31,13 @@ type GitOptions = {
   timeoutMs?: number;
   signal?: AbortSignal;
   expectedRoot?: string;
+  expectedIdentity?: string;
 };
+
+export type RepositoryInspection = Omit<ProjectRecord, "id"> &
+  GitObservation & {
+    identity: string;
+  };
 
 function isMissing(error: NodeJS.ErrnoException) {
   return error.code === "ENOENT" || error.code === "ENOTDIR";
@@ -129,7 +142,7 @@ function parseStatus(text: string): Omit<GitSummary, "observedAt"> {
 export async function inspectRepository(
   path: string,
   options: GitOptions = {},
-): Promise<Omit<ProjectRecord, "id"> & GitSummary> {
+): Promise<RepositoryInspection> {
   const deadline = AbortSignal.timeout(options.timeoutMs ?? gitDeadlineMs);
   const signal = options.signal
     ? AbortSignal.any([options.signal, deadline])
@@ -198,6 +211,33 @@ export async function inspectRepository(
   const root = await folder(topLevel.replace(/\r?\n$/, ""));
   if (options.expectedRoot !== undefined && root !== options.expectedRoot)
     throw new GitError("project_unavailable");
+
+  async function checkoutIdentity() {
+    const gitDir = (
+      await run(root, ["rev-parse", "--absolute-git-dir"])
+    ).replace(/\r?\n$/, "");
+    try {
+      const locations = await Promise.all(
+        [root, gitDir].map((location) => stat(location, { bigint: true })),
+      );
+      // Directory IDs survive a rename and distinguish clones, including linked
+      // worktrees. Git commit IDs alone cannot distinguish two copies.
+      if (locations.some((entry) => !entry.isDirectory() || entry.ino === 0n))
+        throw new GitError("project_identity_unknown");
+      return locations.map(({ dev, ino }) => `${dev}:${ino}`).join("/");
+    } catch (error) {
+      if (error instanceof GitError) throw error;
+      if (isMissing(error as NodeJS.ErrnoException))
+        throw new GitError("invalid_folder");
+      if (isDenied(error as NodeJS.ErrnoException))
+        throw new GitError("permission_denied");
+      throw new GitError("git_failed");
+    }
+  }
+
+  const identity = await checkoutIdentity();
+  if (options.expectedIdentity && options.expectedIdentity !== identity)
+    throw new GitError("project_identity_mismatch");
   // Status may invoke configured clean/process filters when stat checks miss.
   const filters = await run(
     root,
@@ -236,10 +276,15 @@ export async function inspectRepository(
       { overrides },
     ),
   );
+  if ((await checkoutIdentity()) !== identity)
+    throw new GitError("project_identity_mismatch");
   return {
     name: basename(root) || root,
     root,
+    identity,
     ...status,
+    source: gitSource,
+    summaryVersion: gitSummaryVersion,
     observedAt: new Date().toISOString(),
   };
 }
