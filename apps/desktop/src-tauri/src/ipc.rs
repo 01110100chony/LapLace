@@ -28,6 +28,7 @@ pub enum ErrorCode {
     GitFailed,
     GitTimeout,
     ProjectUnavailable,
+    CatalogUnavailable,
     DialogFailed,
     ServiceUnavailable,
     IpcTimeout,
@@ -62,10 +63,32 @@ pub struct Changes {
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Project {
-    pub id: String,
-    pub root: String,
+struct ProjectRecord {
+    id: String,
+    root: String,
     name: String,
+}
+
+impl ProjectRecord {
+    fn valid(&self) -> bool {
+        valid_project_id(&self.id)
+            && std::path::Path::new(&self.root).is_absolute()
+            && !self.name.is_empty()
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Catalog {
+    projects: Vec<ProjectRecord>,
+    selected_project_id: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Project {
+    #[serde(flatten)]
+    record: ProjectRecord,
     branch: Option<String>,
     head: Option<String>,
     changes: Changes,
@@ -77,6 +100,8 @@ pub struct Project {
 enum Payload {
     #[serde(rename = "health")]
     Health(Health),
+    #[serde(rename = "workspace.list")]
+    List(Catalog),
     #[serde(rename = "workspace.addLocal")]
     Add(Project),
     #[serde(rename = "project.inspect")]
@@ -87,6 +112,7 @@ impl Payload {
     fn operation(&self) -> &'static str {
         match self {
             Self::Health(_) => "health",
+            Self::List(_) => "workspace.list",
             Self::Add(_) => "workspace.addLocal",
             Self::Inspect(_) => "project.inspect",
         }
@@ -95,15 +121,14 @@ impl Payload {
     fn valid(&self) -> bool {
         match self {
             Self::Health(health) => !health.version.is_empty() && !health.node_version.is_empty(),
-            Self::Add(project) | Self::Inspect(project) => {
-                project.id.len() == 64
-                    && project
-                        .id
-                        .bytes()
-                        .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-                    && std::path::Path::new(&project.root).is_absolute()
-                    && !project.name.is_empty()
+            Self::List(catalog) => {
+                catalog.projects.iter().all(ProjectRecord::valid)
+                    && catalog
+                        .selected_project_id
+                        .as_ref()
+                        .is_none_or(|id| catalog.projects.iter().any(|project| &project.id == id))
             }
+            Self::Add(project) | Self::Inspect(project) => project.record.valid(),
         }
     }
 }
@@ -131,22 +156,19 @@ pub struct Response {
 }
 
 impl Response {
-    pub fn project(&self) -> Option<&Project> {
-        match &self.body {
-            Body::Success {
-                ok: true,
-                payload: Payload::Add(project) | Payload::Inspect(project),
-            } => Some(project),
-            _ => None,
-        }
-    }
-
-    fn matches(&self, id: &str, operation: &str) -> bool {
+    fn matches(&self, id: &str, operation: Operation<'_>) -> bool {
         self.version == VERSION
             && self.id == id
             && match &self.body {
                 Body::Success { ok: true, payload } => {
-                    payload.operation() == operation && payload.valid()
+                    payload.operation() == operation.name()
+                        && payload.valid()
+                        && match (operation, payload) {
+                            (Operation::Inspect { project_id }, Payload::Inspect(project)) => {
+                                project.record.id == project_id
+                            }
+                            _ => true,
+                        }
                 }
                 Body::Failure { ok: false, .. } => true,
                 _ => false,
@@ -158,9 +180,42 @@ impl Response {
 struct Request<'a> {
     version: u8,
     id: &'a str,
-    operation: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    path: Option<&'a str>,
+    #[serde(flatten)]
+    operation: Operation<'a>,
+}
+
+#[derive(Clone, Copy, Serialize)]
+#[serde(tag = "operation")]
+pub enum Operation<'a> {
+    #[serde(rename = "health")]
+    Health,
+    #[serde(rename = "workspace.list")]
+    List,
+    #[serde(rename = "workspace.addLocal")]
+    Add { path: &'a str },
+    #[serde(rename = "project.inspect")]
+    Inspect {
+        #[serde(rename = "projectId")]
+        project_id: &'a str,
+    },
+}
+
+impl Operation<'_> {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Health => "health",
+            Self::List => "workspace.list",
+            Self::Add { .. } => "workspace.addLocal",
+            Self::Inspect { .. } => "project.inspect",
+        }
+    }
+}
+
+fn valid_project_id(id: &str) -> bool {
+    id.len() == 64
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 pub fn valid_id(id: &str) -> bool {
@@ -219,15 +274,17 @@ impl Process {
 pub struct Sidecar {
     runtime: PathBuf,
     script: PathBuf,
+    data_dir: PathBuf,
     process: Mutex<Option<Process>>,
     stopped: watch::Sender<bool>,
 }
 
 impl Sidecar {
-    pub fn new(runtime: PathBuf, script: PathBuf) -> Self {
+    pub fn new(runtime: PathBuf, script: PathBuf, data_dir: PathBuf) -> Self {
         Self {
             runtime,
             script,
+            data_dir,
             process: Mutex::new(None),
             stopped: watch::channel(false).0,
         }
@@ -239,6 +296,7 @@ impl Sidecar {
             // Node's CommonJS resolver cannot canonicalize a Windows verbatim path.
             .arg("--preserve-symlinks-main")
             .arg(&self.script)
+            .arg(&self.data_dir)
             .env_remove("NODE_OPTIONS")
             .env_remove("NODE_PATH")
             .env_remove("NODE_V8_COVERAGE")
@@ -266,11 +324,15 @@ impl Sidecar {
     pub async fn request(
         &self,
         id: String,
-        operation: &str,
-        path: Option<&str>,
+        operation: Operation<'_>,
     ) -> Result<Response, ErrorCode> {
         if !valid_id(&id) {
             return Err(ErrorCode::InvalidRequest);
+        }
+        if let Operation::Inspect { project_id } = operation {
+            if !valid_project_id(project_id) {
+                return Err(ErrorCode::InvalidRequest);
+            }
         }
 
         let started = Instant::now();
@@ -278,7 +340,6 @@ impl Sidecar {
             id: &id,
             version: VERSION,
             operation,
-            path,
         })
         .map_err(|_| ErrorCode::InvalidRequest)?;
         packet.push(b'\n');
@@ -318,7 +379,8 @@ impl Sidecar {
 
         if let Err(code) = result {
             eprintln!(
-                "[laplace:host] {id} {operation} {code:?} {}ms",
+                "[laplace:host] {id} {} {code:?} {}ms",
+                operation.name(),
                 started.elapsed().as_millis()
             );
             if let Some(process) = slot.take() {

@@ -2,18 +2,18 @@
 
 mod ipc;
 
-use std::{collections::HashMap, sync::Mutex};
-
-use ipc::{ErrorCode, Fault, Response, Sidecar};
+use ipc::{ErrorCode, Fault, Operation, Response, Sidecar};
 use tauri::{path::BaseDirectory, Manager, RunEvent, State, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
 
-#[derive(Default)]
-struct Projects(Mutex<HashMap<String, String>>);
-
 #[tauri::command]
 async fn service_health(id: String, sidecar: State<'_, Sidecar>) -> Result<Response, Fault> {
-    Ok(sidecar.request(id, "health", None).await?)
+    Ok(sidecar.request(id, Operation::Health).await?)
+}
+
+#[tauri::command]
+async fn workspace_list(id: String, sidecar: State<'_, Sidecar>) -> Result<Response, Fault> {
+    Ok(sidecar.request(id, Operation::List).await?)
 }
 
 #[tauri::command]
@@ -21,7 +21,6 @@ async fn workspace_add_local(
     id: String,
     window: WebviewWindow,
     sidecar: State<'_, Sidecar>,
-    projects: State<'_, Projects>,
 ) -> Result<Option<Response>, Fault> {
     if !ipc::valid_id(&id) {
         return Err(ErrorCode::InvalidRequest.into());
@@ -42,17 +41,7 @@ async fn workspace_add_local(
         .into_path()
         .map_err(|_| ErrorCode::InvalidFolder)?;
     let path = path.to_str().ok_or(ErrorCode::InvalidFolder)?;
-    let response = sidecar
-        .request(id, "workspace.addLocal", Some(path))
-        .await?;
-    if let Some(project) = response.project() {
-        projects
-            .0
-            .lock()
-            .map_err(|_| ErrorCode::ServiceUnavailable)?
-            .insert(project.id.clone(), project.root.clone());
-    }
-    Ok(Some(response))
+    Ok(Some(sidecar.request(id, Operation::Add { path }).await?))
 }
 
 #[tauri::command]
@@ -60,29 +49,20 @@ async fn project_inspect(
     id: String,
     project_id: String,
     sidecar: State<'_, Sidecar>,
-    projects: State<'_, Projects>,
 ) -> Result<Response, Fault> {
-    let path = projects
-        .0
-        .lock()
-        .map_err(|_| ErrorCode::ServiceUnavailable)?
-        .get(&project_id)
-        .cloned()
-        .ok_or(ErrorCode::ProjectUnavailable)?;
-    let response = sidecar.request(id, "project.inspect", Some(&path)).await?;
-    if response
-        .project()
-        .is_some_and(|project| project.id != project_id)
-    {
-        return Err(ErrorCode::ProjectUnavailable.into());
-    }
-    Ok(response)
+    Ok(sidecar
+        .request(
+            id,
+            Operation::Inspect {
+                project_id: &project_id,
+            },
+        )
+        .await?)
 }
 
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(Projects::default())
         .setup(|app| {
             let runtime = app
                 .path()
@@ -90,11 +70,13 @@ fn main() {
             let script = app
                 .path()
                 .resolve("sidecar/service.cjs", BaseDirectory::Resource)?;
-            app.manage(Sidecar::new(runtime, script));
+            let data_dir = app.path().app_local_data_dir()?;
+            app.manage(Sidecar::new(runtime, script, data_dir));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             service_health,
+            workspace_list,
             workspace_add_local,
             project_inspect
         ])

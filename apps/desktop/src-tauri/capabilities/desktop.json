@@ -5,6 +5,7 @@
   "windows": ["main"],
   "permissions": [
     "allow-service-health",
+    "allow-workspace-list",
     "allow-workspace-add-local",
     "allow-project-inspect",
     "core:window:allow-is-decorated",

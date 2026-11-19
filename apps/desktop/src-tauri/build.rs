@@ -1,6 +1,7 @@
 fn main() {
     let commands = tauri_build::AppManifest::new().commands(&[
         "service_health",
+        "workspace_list",
         "workspace_add_local",
         "project_inspect",
     ]);

@@ -1,6 +1,6 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Health, Project } from "@laplace/contracts";
+import type { GitSummary, Project, ProjectRecord } from "@laplace/contracts";
 import { AppTitleBar } from "./AppTitleBar";
 import { ImportDialog } from "./ImportDialog";
 import { createDesktopClient, DesktopError, errorMessage } from "./ipc";
@@ -20,7 +20,8 @@ const desktop = createDesktopClient(async (command, args) => {
 type Selection = { id: string; status: ProjectStatus };
 
 export function App() {
-  const [projects, setProjects] = useState<Project[]>([]);
+  const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const [summaries, setSummaries] = useState<Record<string, GitSummary>>({});
   const [selection, setSelection] = useState<Selection | null>(null);
   const [recentId, setRecentId] = useState<string>();
   const [service, setService] = useState<ServiceStatus>({ state: "loading" });
@@ -32,19 +33,48 @@ export function App() {
   const recent = projects.find((project) => project.id === recentId);
   const activeId = selection?.id;
 
-  const checkService = useCallback(async () => {
+  const inspect = useCallback(
+    (project: ProjectRecord) => {
+      setRecentId(project.id);
+      setSelection({ id: project.id, status: { state: "loading" } });
+      void latest.run(
+        () => desktop.inspect(project.id),
+        (fresh) => {
+          setSummaries((items) => ({ ...items, [project.id]: fresh }));
+          setSelection({ id: project.id, status: { state: "ready" } });
+        },
+        (error) => {
+          setSelection({
+            id: project.id,
+            status: { state: "error", message: errorMessage(error) },
+          });
+        },
+      );
+    },
+    [latest],
+  );
+
+  const loadWorkspace = useCallback(async () => {
     setService({ state: "loading" });
     try {
-      const health: Health = await desktop.health();
+      const [health, catalog] = await Promise.all([
+        desktop.health(),
+        desktop.list(),
+      ]);
+      setProjects(catalog.projects);
+      const selected = catalog.projects.find(
+        (project) => project.id === catalog.selectedProjectId,
+      );
+      if (selected) inspect(selected);
       setService({ state: "ready", health });
     } catch (error) {
       setService({ state: "error", message: errorMessage(error) });
     }
-  }, []);
+  }, [inspect]);
 
   useEffect(() => {
-    void checkService();
-  }, [checkService]);
+    void loadWorkspace();
+  }, [loadWorkspace]);
 
   useEffect(() => {
     if (focusOnNavigation.current) {
@@ -52,14 +82,6 @@ export function App() {
       focusOnNavigation.current = false;
     }
   }, [activeId]);
-
-  function remember(project: Project) {
-    setProjects((items) =>
-      items.some((item) => item.id === project.id)
-        ? items.map((item) => (item.id === project.id ? project : item))
-        : [...items, project],
-    );
-  }
 
   function goHome() {
     if (selection) focusOnNavigation.current = true;
@@ -70,28 +92,20 @@ export function App() {
   function acceptProject(project: Project) {
     if (selection?.id !== project.id) focusOnNavigation.current = true;
     latest.invalidate();
-    remember(project);
+    const { id, name, root } = project;
+    setProjects((items) =>
+      items.some((item) => item.id === id)
+        ? items
+        : [...items, { id, name, root }],
+    );
+    setSummaries((items) => ({ ...items, [id]: project }));
     setRecentId(project.id);
     setSelection({ id: project.id, status: { state: "ready" } });
   }
 
-  function inspect(project: Project) {
+  function openProject(project: ProjectRecord) {
     if (selection?.id !== project.id) focusOnNavigation.current = true;
-    setRecentId(project.id);
-    setSelection({ id: project.id, status: { state: "loading" } });
-    void latest.run(
-      () => desktop.inspect(project.id),
-      (fresh) => {
-        remember(fresh);
-        setSelection({ id: project.id, status: { state: "ready" } });
-      },
-      (error) => {
-        setSelection({
-          id: project.id,
-          status: { state: "error", message: errorMessage(error) },
-        });
-      },
-    );
+    inspect(project);
   }
 
   function showImport() {
@@ -123,7 +137,7 @@ export function App() {
                 <button
                   className="nav-item"
                   aria-current={active?.id === project.id ? "page" : undefined}
-                  onClick={() => inspect(project)}
+                  onClick={() => openProject(project)}
                   title={project.root}
                 >
                   <span className="project-mark" aria-hidden="true" />
@@ -133,7 +147,13 @@ export function App() {
             ))}
           </ul>
         ) : (
-          <p className="nav-empty">Nenhum projeto local</p>
+          <p className="nav-empty">
+            {service.state === "ready"
+              ? "Nenhum projeto local"
+              : service.state === "loading"
+                ? "Carregando projetos…"
+                : "Catálogo indisponível"}
+          </p>
         )}
         <div className="sidebar-footer">
           <span className="footer-mark" aria-hidden="true">
@@ -148,17 +168,19 @@ export function App() {
           {active && selection ? (
             <ProjectView
               project={active}
+              summary={summaries[active.id]}
               status={selection.status}
               refresh={() => inspect(active)}
             />
           ) : (
             <Home
               projects={projects}
+              summaries={summaries}
               recent={recent}
               service={service}
               add={showImport}
-              open={inspect}
-              retryService={() => void checkService()}
+              open={openProject}
+              retryService={() => void loadWorkspace()}
             />
           )}
         </main>

@@ -79,7 +79,7 @@ test("lê branch e HEAD reais de uma subpasta com espaços e acentos", async (t)
   assert.equal(result.name, "Projeto São João");
   assert.equal(result.branch, "feat/açúcar");
   assert.equal(result.head, git(root, "rev-parse", "HEAD"));
-  assert.equal(result.id, (await inspectRepository(root)).id);
+  assert.equal(result.root, (await inspectRepository(root)).root);
   assert.deepEqual(result.changes, {
     staged: 0,
     unstaged: 0,
@@ -149,7 +149,7 @@ test("reconhece worktree vinculada pela raiz e branch próprias", async (t) => {
     inspectRepository(root),
     inspectRepository(linked),
   ]);
-  assert.notEqual(original.id, worktree.id);
+  assert.notEqual(original.root, worktree.root);
   assert.equal(worktree.root, await realpath(linked));
   assert.equal(worktree.branch, "outra");
   assert.equal(worktree.head, original.head);

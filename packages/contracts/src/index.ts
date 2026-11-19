@@ -10,6 +10,7 @@ export const errorCodes = [
   "git_failed",
   "git_timeout",
   "project_unavailable",
+  "catalog_unavailable",
   "dialog_failed",
   "service_unavailable",
   "ipc_timeout",
@@ -20,10 +21,12 @@ export const errorCodes = [
 export type ErrorCode = (typeof errorCodes)[number];
 export type IpcError = { code: ErrorCode };
 export type Health = { version: string; nodeVersion: string };
-export type Project = {
+export type ProjectRecord = {
   id: string;
   name: string;
   root: string;
+};
+export type GitSummary = {
   branch: string | null;
   head: string | null;
   changes: {
@@ -34,18 +37,27 @@ export type Project = {
   };
   observedAt: string;
 };
+export type Project = ProjectRecord & GitSummary;
+export type Catalog = {
+  projects: ProjectRecord[];
+  selectedProjectId: string | null;
+};
 
 export type Results = {
   health: Health;
+  "workspace.list": Catalog;
   "workspace.addLocal": Project;
   "project.inspect": Project;
 };
 export type Operation = keyof Results;
-export type ProjectOperation = Exclude<Operation, "health">;
-
 type Envelope = { version: typeof protocolVersion; id: string };
 export type Request = Envelope &
-  ({ operation: "health" } | { operation: ProjectOperation; path: string });
+  (
+    | { operation: "health" }
+    | { operation: "workspace.list" }
+    | { operation: "workspace.addLocal"; path: string }
+    | { operation: "project.inspect"; projectId: string }
+  );
 export type Response<K extends Operation = Operation> =
   | { [P in K]: Envelope & { operation: P; ok: true; data: Results[P] } }[K]
   | (Envelope & { ok: false; error: IpcError });
@@ -76,9 +88,17 @@ export function parseRequest(value: unknown): Request | undefined {
   }
   const envelope = { id: value.id, version: protocolVersion } as const;
   if (value.operation === "health") return { ...envelope, operation: "health" };
+  if (value.operation === "workspace.list")
+    return { ...envelope, operation: "workspace.list" };
+  if (value.operation === "project.inspect" && isProjectId(value.projectId)) {
+    return {
+      ...envelope,
+      operation: "project.inspect",
+      projectId: value.projectId,
+    };
+  }
   if (
-    (value.operation === "workspace.addLocal" ||
-      value.operation === "project.inspect") &&
+    value.operation === "workspace.addLocal" &&
     typeof value.path === "string" &&
     value.path.length > 0 &&
     value.path.length <= 32_767 &&
@@ -96,12 +116,21 @@ function count(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
-function isProject(value: unknown): value is Project {
+function isProjectRecord(
+  value: unknown,
+): value is ProjectRecord & Record<string, unknown> {
   return (
     isRecord(value) &&
     isProjectId(value.id) &&
     nonempty(value.name) &&
-    nonempty(value.root) &&
+    nonempty(value.root)
+  );
+}
+
+function isProject(value: unknown): value is Project {
+  return (
+    isRecord(value) &&
+    isProjectRecord(value) &&
     (value.branch === null || nonempty(value.branch)) &&
     (value.head === null ||
       (typeof value.head === "string" &&
@@ -113,6 +142,16 @@ function isProject(value: unknown): value is Project {
     count(value.changes.unstaged) &&
     count(value.changes.untracked) &&
     count(value.changes.conflicted)
+  );
+}
+
+function isCatalog(value: unknown): value is Catalog {
+  if (!isRecord(value) || !Array.isArray(value.projects)) return false;
+  const projects: unknown[] = value.projects;
+  return (
+    projects.every(isProjectRecord) &&
+    (value.selectedProjectId === null ||
+      projects.some((project) => project.id === value.selectedProjectId))
   );
 }
 
@@ -130,9 +169,8 @@ export function isResponse<K extends Operation>(
   if (!isRecord(value) || value.version !== protocolVersion || value.id !== id)
     return false;
   if (value.ok === false) return isIpcError(value.error);
-  return (
-    value.ok === true &&
-    value.operation === operation &&
-    (operation === "health" ? isHealth(value.data) : isProject(value.data))
-  );
+  if (value.ok !== true || value.operation !== operation) return false;
+  if (operation === "health") return isHealth(value.data);
+  if (operation === "workspace.list") return isCatalog(value.data);
+  return isProject(value.data);
 }

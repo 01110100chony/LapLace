@@ -1,12 +1,13 @@
-import { constants } from "node:fs";
-import { access, realpath, stat } from "node:fs/promises";
+import { constants, realpath } from "node:fs";
+import { access, stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
 import { basename, delimiter, isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
-import type { ErrorCode, Project } from "@laplace/contracts";
+import type { ErrorCode, GitSummary, ProjectRecord } from "@laplace/contracts";
 
 const exec = promisify(execFile);
+// Native resolution also returns the on-disk casing on Windows.
+const canonicalPath = promisify(realpath.native);
 const gitDeadlineMs = 7_000;
 
 export class GitError extends Error {
@@ -22,6 +23,7 @@ type GitOptions = {
   env?: NodeJS.ProcessEnv;
   timeoutMs?: number;
   signal?: AbortSignal;
+  expectedRoot?: string;
 };
 
 function isMissing(error: NodeJS.ErrnoException) {
@@ -35,7 +37,7 @@ function isDenied(error: NodeJS.ErrnoException) {
 async function folder(path: string): Promise<string> {
   try {
     if (!isAbsolute(path)) throw new GitError("invalid_folder");
-    const canonical = await realpath(path);
+    const canonical = await canonicalPath(path);
     if (!(await stat(canonical)).isDirectory())
       throw new GitError("invalid_folder");
     return canonical;
@@ -85,9 +87,7 @@ function gitEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   };
 }
 
-function parseStatus(
-  text: string,
-): Pick<Project, "branch" | "head" | "changes"> {
+function parseStatus(text: string): Omit<GitSummary, "observedAt"> {
   const records = text.split("\0");
   if (records.pop() !== "") throw new GitError("git_failed");
   let branch: string | null | undefined;
@@ -129,7 +129,7 @@ function parseStatus(
 export async function inspectRepository(
   path: string,
   options: GitOptions = {},
-): Promise<Project> {
+): Promise<Omit<ProjectRecord, "id"> & GitSummary> {
   const deadline = AbortSignal.timeout(options.timeoutMs ?? gitDeadlineMs);
   const signal = options.signal
     ? AbortSignal.any([options.signal, deadline])
@@ -196,6 +196,8 @@ export async function inspectRepository(
 
   const topLevel = await run(selected, ["rev-parse", "--show-toplevel"]);
   const root = await folder(topLevel.replace(/\r?\n$/, ""));
+  if (options.expectedRoot !== undefined && root !== options.expectedRoot)
+    throw new GitError("project_unavailable");
   // Status may invoke configured clean/process filters when stat checks miss.
   const filters = await run(
     root,
@@ -235,7 +237,6 @@ export async function inspectRepository(
     ),
   );
   return {
-    id: createHash("sha256").update(root).digest("hex"),
     name: basename(root) || root,
     root,
     ...status,

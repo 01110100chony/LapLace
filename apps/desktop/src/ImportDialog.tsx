@@ -50,12 +50,16 @@ export function ImportDialog({ dialogRef, choose, onImported }: Props) {
       className="import-dialog"
       aria-labelledby={headingId}
       aria-describedby={descriptionId}
+      onCancel={(event) => {
+        if (busy) event.preventDefault();
+      }}
       onClose={reset}
     >
       <div className="dialog-heading">
         <h2 id={headingId}>Adicionar projeto</h2>
         <button
           className="icon-button"
+          disabled={busy}
           onClick={() => dialogRef.current?.close()}
           aria-label="Fechar"
         >
@@ -74,7 +78,11 @@ export function ImportDialog({ dialogRef, choose, onImported }: Props) {
         </p>
       )}
       <div className="dialog-actions">
-        <button className="button" onClick={() => dialogRef.current?.close()}>
+        <button
+          className="button"
+          disabled={busy}
+          onClick={() => dialogRef.current?.close()}
+        >
           Cancelar
         </button>
         <button

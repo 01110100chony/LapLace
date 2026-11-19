@@ -1,4 +1,4 @@
-import type { Health, Project } from "@laplace/contracts";
+import type { GitSummary, Health, ProjectRecord } from "@laplace/contracts";
 
 export type ServiceStatus =
   | { state: "loading" }
@@ -11,26 +11,29 @@ export type ProjectStatus =
   | { state: "error"; message: string };
 
 type HomeProps = {
-  projects: Project[];
-  recent: Project | undefined;
+  projects: ProjectRecord[];
+  summaries: Readonly<Record<string, GitSummary>>;
+  recent: ProjectRecord | undefined;
   service: ServiceStatus;
   add: () => void;
-  open: (project: Project) => void;
+  open: (project: ProjectRecord) => void;
   retryService: () => void;
 };
 
-function branchLabel(project: Project) {
-  return project.branch ?? "HEAD destacado";
+function branchLabel(summary: GitSummary) {
+  return summary.branch ?? "HEAD destacado";
 }
 
 export function Home({
   projects,
+  summaries,
   recent,
   service,
   add,
   open,
   retryService,
 }: HomeProps) {
+  const recentSummary = recent && summaries[recent.id];
   return (
     <>
       <header className="headline">
@@ -53,14 +56,20 @@ export function Home({
             </span>
             <p className="label">{recent ? "Continuar" : "Projetos locais"}</p>
             <h2 id="next-project">
-              {recent ? recent.name : "Abra seu primeiro projeto"}
+              {recent
+                ? recent.name
+                : service.state === "ready"
+                  ? "Abra seu primeiro projeto"
+                  : "Projetos locais"}
             </h2>
             <p>
-              {recent ? (
+              {recentSummary ? (
                 <>
-                  <code>{branchLabel(recent)}</code> ·{" "}
-                  {recent.head ? "Repositório Git" : "Sem commits"}
+                  <code>{branchLabel(recentSummary)}</code> ·{" "}
+                  {recentSummary.head ? "Repositório Git" : "Sem commits"}
                 </>
+              ) : recent ? (
+                recent.root
               ) : (
                 "Selecione uma pasta para consultar a branch, o HEAD e as alterações do Git."
               )}
@@ -70,7 +79,11 @@ export function Home({
                 Abrir projeto <span aria-hidden="true">→</span>
               </button>
             ) : (
-              <button className="button primary" onClick={add}>
+              <button
+                className="button primary"
+                disabled={service.state !== "ready"}
+                onClick={add}
+              >
                 <span aria-hidden="true">+</span> Adicionar projeto
               </button>
             )}
@@ -100,7 +113,13 @@ export function Home({
                         <strong>{project.name}</strong>
                         <small title={project.root}>{project.root}</small>
                       </span>
-                      <code className="tag">{branchLabel(project)}</code>
+                      {summaries[project.id] ? (
+                        <code className="tag">
+                          {branchLabel(summaries[project.id]!)}
+                        </code>
+                      ) : (
+                        <span aria-hidden="true" />
+                      )}
                       <span className="chevron" aria-hidden="true">
                         ›
                       </span>
@@ -109,7 +128,13 @@ export function Home({
                 ))}
               </ul>
             ) : (
-              <p className="empty">Nenhum projeto adicionado.</p>
+              <p className="empty">
+                {service.state === "ready"
+                  ? "Nenhum projeto adicionado."
+                  : service.state === "loading"
+                    ? "Carregando projetos…"
+                    : "Catálogo indisponível."}
+              </p>
             )}
           </section>
         </div>
@@ -147,7 +172,9 @@ function ServicePanel({
         )}
         {service.state === "error" && (
           <>
-            <p className="service-error">{service.message}</p>
+            <p className="service-error" role="alert">
+              {service.message}
+            </p>
             <button className="text-button" onClick={retry}>
               Reconectar
             </button>
@@ -165,10 +192,12 @@ const observedFormat = new Intl.DateTimeFormat("pt-BR", {
 
 export function ProjectView({
   project,
+  summary,
   status,
   refresh,
 }: {
-  project: Project;
+  project: ProjectRecord;
+  summary: GitSummary | undefined;
   status: ProjectStatus;
   refresh: () => void;
 }) {
@@ -191,18 +220,19 @@ export function ProjectView({
         </button>
       </header>
       <div className="project-view-label">Visão geral</div>
-      {status.state === "loading" ? (
+      {status.state === "loading" && (
         <p className="panel loading" role="status">
           <span aria-hidden="true" /> Consultando o Git…
         </p>
-      ) : (
+      )}
+      {status.state === "error" && (
+        <div className="error-banner" role="alert">
+          <strong>{status.message}</strong>
+          {summary && <p>Exibindo a última leitura do repositório.</p>}
+        </div>
+      )}
+      {summary && status.state !== "loading" && (
         <>
-          {status.state === "error" && (
-            <div className="error-banner" role="alert">
-              <strong>{status.message}</strong>
-              <p>Exibindo a última leitura do repositório.</p>
-            </div>
-          )}
           <div className="project-grid">
             <section className="panel" aria-labelledby="repo-heading">
               <h2 id="repo-heading">Repositório Git</h2>
@@ -210,13 +240,13 @@ export function ProjectView({
                 <div>
                   <dt>Branch</dt>
                   <dd>
-                    <code>{branchLabel(project)}</code>
+                    <code>{branchLabel(summary)}</code>
                   </dd>
                 </div>
                 <div>
                   <dt>HEAD</dt>
                   <dd>
-                    {project.head ? <code>{project.head}</code> : "Sem commits"}
+                    {summary.head ? <code>{summary.head}</code> : "Sem commits"}
                   </dd>
                 </div>
               </dl>
@@ -226,24 +256,24 @@ export function ProjectView({
               <dl className="change-counts">
                 <div>
                   <dt>Preparadas</dt>
-                  <dd>{project.changes.staged}</dd>
+                  <dd>{summary.changes.staged}</dd>
                 </div>
                 <div>
                   <dt>Não preparadas</dt>
-                  <dd>{project.changes.unstaged}</dd>
+                  <dd>{summary.changes.unstaged}</dd>
                 </div>
                 <div>
                   <dt>Não rastreadas</dt>
-                  <dd>{project.changes.untracked}</dd>
+                  <dd>{summary.changes.untracked}</dd>
                 </div>
-                {project.changes.conflicted > 0 && (
+                {summary.changes.conflicted > 0 && (
                   <div>
                     <dt>Em conflito</dt>
-                    <dd>{project.changes.conflicted}</dd>
+                    <dd>{summary.changes.conflicted}</dd>
                   </div>
                 )}
               </dl>
-              {Object.values(project.changes).every((count) => count === 0) && (
+              {Object.values(summary.changes).every((count) => count === 0) && (
                 <p className="clean">
                   <span className="status-dot" aria-hidden="true" /> Árvore de
                   trabalho limpa
@@ -253,8 +283,8 @@ export function ProjectView({
           </div>
           <p className="observed">
             Leitura em{" "}
-            <time dateTime={project.observedAt}>
-              {observedFormat.format(new Date(project.observedAt))}
+            <time dateTime={summary.observedAt}>
+              {observedFormat.format(new Date(summary.observedAt))}
             </time>
           </p>
         </>

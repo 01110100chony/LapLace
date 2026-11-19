@@ -9,10 +9,26 @@ import {
   type Response,
 } from "@laplace/contracts";
 import { GitError, inspectRepository } from "./git.ts";
+import { openCatalog } from "./catalog.ts";
 
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 const exit = new AbortController();
 input.once("close", () => exit.abort());
+const dataDir = process.argv[2] ?? "";
+let catalog: ReturnType<typeof openCatalog> | undefined;
+
+class CatalogError extends Error {}
+
+function withCatalog<T>(
+  operation: (store: ReturnType<typeof openCatalog>) => T,
+): T {
+  try {
+    catalog ??= openCatalog(dataDir);
+    return operation(catalog);
+  } catch {
+    throw new CatalogError();
+  }
+}
 
 async function respond(line: string): Promise<Response> {
   let value: unknown;
@@ -31,6 +47,7 @@ async function respond(line: string): Promise<Response> {
 
   try {
     if (request.operation === "health") {
+      withCatalog(() => undefined);
       return {
         ...envelope,
         operation: "health",
@@ -38,10 +55,42 @@ async function respond(line: string): Promise<Response> {
         data: { version: "0.1.0", nodeVersion: process.versions.node },
       };
     }
-    const data = await inspectRepository(request.path, { signal: exit.signal });
+    if (request.operation === "workspace.list") {
+      const data = withCatalog((store) => store.list());
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "workspace.addLocal") {
+      const summary = await inspectRepository(request.path, {
+        signal: exit.signal,
+      });
+      const project = withCatalog((store) => store.add(summary));
+      const data = { ...summary, ...project };
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+
+    const project = withCatalog((store) => store.select(request.projectId));
+    if (!project) throw new GitError("project_unavailable");
+    const summary = await inspectRepository(project.root, {
+      signal: exit.signal,
+      expectedRoot: project.root,
+    }).catch((error: unknown) => {
+      if (
+        error instanceof GitError &&
+        (error.code === "invalid_folder" || error.code === "not_repository")
+      ) {
+        throw new GitError("project_unavailable");
+      }
+      throw error;
+    });
+    const data = { ...summary, ...project };
     return { ...envelope, operation: request.operation, ok: true, data };
   } catch (error) {
-    const code = error instanceof GitError ? error.code : "git_failed";
+    const code =
+      error instanceof GitError
+        ? error.code
+        : error instanceof CatalogError
+          ? "catalog_unavailable"
+          : "git_failed";
     return { ...envelope, ok: false, error: { code } };
   }
 }
@@ -59,8 +108,10 @@ async function serve() {
   }
 }
 
-void serve().catch(() => {
-  process.exitCode = 1;
-  input.close();
-  process.stdin.destroy();
-});
+void serve()
+  .finally(() => catalog?.close())
+  .catch(() => {
+    process.exitCode = 1;
+    input.close();
+    process.stdin.destroy();
+  });
