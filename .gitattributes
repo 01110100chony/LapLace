@@ -1,2 +1,4 @@
 * text=auto eol=lf
 *.ico binary
+# Preserve the original NSIS COPYING text and line endings.
+apps/desktop/licenses/NSIS.txt -text whitespace=-blank-at-eol

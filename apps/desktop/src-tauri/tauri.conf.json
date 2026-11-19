@@ -31,6 +31,10 @@
     "active": false,
     "icon": ["icons/icon.ico"],
     "externalBin": ["generated/laplace-node"],
-    "resources": { "generated/service.cjs": "sidecar/service.cjs" }
+    "resources": {
+      "generated/service.cjs": "sidecar/service.cjs",
+      "generated/NODE-LICENSE.txt": "licenses/NODE-LICENSE.txt",
+      "generated/THIRD-PARTY-NOTICES.txt": "licenses/THIRD-PARTY-NOTICES.txt"
+    }
   }
 }

@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main, feat/desktop-foundation]
+  pull_request:
+    branches: [main, feat/desktop-foundation]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows x64 (MSVC)
+    runs-on: windows-2025
+    timeout-minutes: 40
+    env:
+      RUSTUP_TOOLCHAIN: 1.95.0-x86_64-pc-windows-msvc
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - uses: pnpm/action-setup@v6
+        with:
+          cache: true
+      - run: pnpm install --frozen-lockfile
+      - run: rustup toolchain install $env:RUSTUP_TOOLCHAIN --profile minimal --component rustfmt
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+          key: windows-msvc-cargo-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm format:check
+      - run: pnpm test
+      - run: pnpm build:web
+      - name: Prepare native resources
+        run: pnpm --filter @laplace/desktop prepare:sidecar
+      - name: Check Rust formatting and compilation
+        run: |
+          cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --all -- --check
+          cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --target x86_64-pc-windows-msvc --features custom-protocol
+      - name: Build Tauri NSIS installer
+        working-directory: apps/desktop
+        run: node node_modules/@tauri-apps/cli/tauri.js build --ci --no-sign --target x86_64-pc-windows-msvc -- --locked
+      - name: Smoke test the installed sidecar
+        run: |
+          $bundle = 'apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis'
+          $installer = @(Get-ChildItem -LiteralPath $bundle -Filter '*-setup.exe' -File)
+          if ($installer.Count -ne 1) { throw 'Expected one NSIS installer.' }
+          ./scripts/smoke-windows.ps1 -Installer $installer[0].FullName
+      - uses: actions/upload-artifact@v7
+        with:
+          name: laplace-windows-x64-nsis
+          path: apps/desktop/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 14

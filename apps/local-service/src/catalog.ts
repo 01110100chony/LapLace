@@ -66,8 +66,8 @@ function writeTransaction<T>(database: DatabaseSync, write: () => T): T {
 export function openCatalog(dataDir: string) {
   if (!isAbsolute(dataDir)) throw new Error("Absolute data directory required");
   mkdirSync(dataDir, { recursive: true });
-  // Keep the default rollback journal. Node 24 can bundle a SQLite release
-  // affected by the WAL-reset bug when multiple processes open the catalog.
+  // Keep the default rollback journal for compatibility with older catalogs
+  // and Node 24 development builds that may carry an older SQLite.
   const database = new DatabaseSync(join(dataDir, "catalog.sqlite3"), {
     enableForeignKeyConstraints: true,
     timeout: 2_000,
