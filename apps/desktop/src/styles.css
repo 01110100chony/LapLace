@@ -75,7 +75,7 @@ time {
 
 .skip-link:focus {
   position: fixed;
-  z-index: 2;
+  z-index: 3;
   inset: 8px auto auto 8px;
   padding: 8px 12px;
   background: var(--accent);
@@ -83,30 +83,37 @@ time {
 }
 
 .frame {
+  --sidebar-width: 220px;
+  --titlebar-height: 46px;
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-rows: var(--titlebar-height) 1fr;
   min-height: 100vh;
 }
 
 .sidebar {
   position: sticky;
-  top: 0;
+  top: var(--titlebar-height);
   display: flex;
   flex-direction: column;
   gap: 6px;
-  height: 100vh;
-  padding: 26px 14px 14px;
+  height: calc(100vh - var(--titlebar-height));
+  padding: 16px 14px 14px;
   overflow: auto;
   border-right: 1px solid var(--rule);
   background: var(--side);
 }
 
 .brand {
+  flex: 0 0 var(--sidebar-width);
+  align-self: stretch;
   display: flex;
   align-items: center;
   gap: 11px;
-  margin: 0 10px 25px;
-  font-size: 23px;
+  padding-inline: 23px;
+  border-right: 1px solid var(--rule);
+  background: var(--side);
+  font-size: 21px;
   font-weight: 650;
   letter-spacing: -1.2px;
 }
@@ -114,7 +121,7 @@ time {
 .brand-mark {
   color: var(--accent);
   font:
-    bold 34px/1 Georgia,
+    bold 28px/1 Georgia,
     serif;
   transform: rotate(-9deg);
 }
@@ -204,14 +211,16 @@ time {
     serif;
 }
 
-.topbar {
+.app-titlebar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 58px;
-  padding: 8px 30px;
+  height: var(--titlebar-height);
   border-bottom: 1px solid var(--rule);
+  background: var(--bg);
   color: var(--sub);
   font-size: 12px;
 }
@@ -221,20 +230,24 @@ time {
   align-items: center;
   gap: 10px;
   min-width: 0;
+  margin-left: 26px;
 }
 
 .breadcrumb strong {
-  overflow-wrap: anywhere;
+  min-width: 0;
+  max-width: 42ch;
+  overflow: hidden;
   color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.breadcrumb-separator,
-.topbar-context {
+.breadcrumb-separator {
   color: var(--dim);
 }
 
-.topbar-context {
-  white-space: nowrap;
+.crumb-back {
+  display: none;
 }
 
 .crumb-action {
@@ -246,6 +259,53 @@ time {
 .crumb-action:hover,
 .text-button:hover {
   text-decoration: underline;
+}
+
+.window-drag-region {
+  align-self: stretch;
+  flex: 1 0 28px;
+}
+
+.app-titlebar [data-tauri-drag-region] {
+  user-select: none;
+}
+
+.window-controls {
+  display: flex;
+  align-self: stretch;
+}
+
+.window-control {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  padding: 0;
+  color: var(--sub);
+}
+
+.window-control svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.15;
+  pointer-events: none;
+}
+
+.window-control:hover,
+.window-control:active {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.window-close:hover,
+.window-close:active {
+  background: #a73530;
+  color: #fff;
+}
+
+.window-control:focus-visible {
+  outline-offset: -4px;
 }
 
 .main {
@@ -672,7 +732,7 @@ h1 {
 
 @media (max-width: 1100px) {
   .frame {
-    grid-template-columns: 190px minmax(0, 1fr);
+    --sidebar-width: 190px;
   }
 
   .main {
@@ -691,7 +751,7 @@ h1 {
 
 @media (max-width: 850px) {
   .frame {
-    grid-template-columns: 158px minmax(0, 1fr);
+    --sidebar-width: 158px;
   }
 
   .sidebar {
@@ -709,8 +769,8 @@ h1 {
     border-left: 0;
   }
 
-  .topbar {
-    padding-inline: 20px;
+  .breadcrumb {
+    margin-left: 16px;
   }
 }
 
@@ -731,13 +791,14 @@ h1 {
   }
 
   .brand {
-    margin: 0 8px 0 0;
+    flex-basis: auto;
+    gap: 8px;
+    padding-inline: 14px;
     font-size: 20px;
   }
 
   .sidebar-footer,
-  .nav-empty,
-  .topbar-context {
+  .nav-empty {
     display: none;
   }
 
@@ -753,8 +814,7 @@ h1 {
     grid-template-columns: repeat(auto-fit, minmax(min(115px, 100%), 1fr));
   }
 
-  .main,
-  .topbar {
+  .main {
     padding-inline: 14px;
   }
 
@@ -764,5 +824,25 @@ h1 {
 
   .hero {
     padding: 18px;
+  }
+}
+
+@media (max-width: 520px) {
+  .breadcrumb {
+    gap: 6px;
+    margin-left: 10px;
+  }
+
+  .crumb-home-label,
+  .crumb-root,
+  .breadcrumb-separator {
+    display: none;
+  }
+
+  .crumb-back {
+    display: inline-block;
+    min-width: 28px;
+    font-size: 20px;
+    text-align: center;
   }
 }

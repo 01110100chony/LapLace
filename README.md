@@ -34,6 +34,12 @@ pnpm dev --target x86_64-pc-windows-gnu
 pnpm build --target x86_64-pc-windows-gnu
 ```
 
+### Barra de título
+
+No Windows, a marca, o breadcrumb e os controles de janela ficam na mesma barra. Arraste pela área livre ou dê um duplo clique nela para maximizar ou restaurar. As bordas continuam sob controle do sistema. O botão personalizado maximiza e restaura com clique. Para abrir o menu de Snap Layouts no Windows 11, use **Win+Z** com o Snap habilitado. O menu ao passar o mouse depende de um teste de área nativo do Windows no botão de maximizar. [Snap Layouts no Windows 11](https://learn.microsoft.com/en-us/windows/apps/desktop/modernize/ui/apply-snap-layout-menu)
+
+O override do Tauri ativa a janela sem moldura no Windows. Em futuros builds para Linux e macOS, a configuração base preserva a decoração do sistema.
+
 ## Estrutura
 
 ```text

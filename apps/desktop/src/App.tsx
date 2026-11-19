@@ -1,6 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Health, Project } from "@laplace/contracts";
+import { AppTitleBar } from "./AppTitleBar";
 import { ImportDialog } from "./ImportDialog";
 import { createDesktopClient, DesktopError, errorMessage } from "./ipc";
 import {
@@ -102,13 +103,8 @@ export function App() {
       <a className="skip-link" href="#content">
         Ir para o conteúdo
       </a>
+      <AppTitleBar projectName={active?.name} goHome={goHome} />
       <nav className="sidebar" aria-label="Navegação principal">
-        <div className="brand">
-          <span className="brand-mark" aria-hidden="true">
-            λ
-          </span>
-          Laplace
-        </div>
         <button
           className="nav-item"
           aria-current={active ? undefined : "page"}
@@ -148,22 +144,6 @@ export function App() {
       </nav>
 
       <div className="workspace">
-        <header className="topbar">
-          <div className="breadcrumb">
-            {active ? (
-              <button className="crumb-action" onClick={goHome}>
-                Área de trabalho
-              </button>
-            ) : (
-              <span>Workspace</span>
-            )}
-            <span className="breadcrumb-separator" aria-hidden="true">
-              /
-            </span>
-            <strong>{active?.name ?? "Área de trabalho"}</strong>
-          </div>
-          <span className="topbar-context">Workspace local</span>
-        </header>
         <main ref={main} id="content" tabIndex={-1} className="main">
           {active && selection ? (
             <ProjectView
