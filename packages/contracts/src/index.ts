@@ -19,6 +19,10 @@ export const errorCodes = [
   "ipc_timeout",
   "invalid_response",
   "desktop_required",
+  "context_not_found",
+  "context_path_unavailable",
+  "context_timeout",
+  "context_limit",
 ] as const;
 
 export type ErrorCode = (typeof errorCodes)[number];
@@ -53,7 +57,7 @@ export type Catalog = {
   selectedProjectId: string | null;
 };
 
-export type Results = {
+export type Results = ContextResults & {
   health: Health;
   "workspace.list": Catalog;
   "workspace.addLocal": Project;
@@ -70,6 +74,7 @@ export type Request = Envelope &
     | { operation: "workspace.addLocal"; path: string }
     | { operation: "project.select" | "project.inspect"; projectId: string }
     | { operation: "project.relocate"; projectId: string; path: string }
+    | ContextRequests
   );
 export type Response<K extends Operation = Operation> =
   | { [P in K]: Envelope & { operation: P; ok: true; data: Results[P] } }[K]
@@ -100,6 +105,8 @@ export function parseRequest(value: unknown): Request | undefined {
     return;
   }
   const envelope = { id: value.id, version: protocolVersion } as const;
+  const context = parseContextRequest(value);
+  if (context) return { ...envelope, ...context };
   if (value.operation === "health") return { ...envelope, operation: "health" };
   if (value.operation === "workspace.list")
     return { ...envelope, operation: "workspace.list" };
@@ -197,8 +204,24 @@ export function isResponse<K extends Operation>(
   if (value.ok !== true || value.operation !== operation) return false;
   if (operation === "health") return isHealth(value.data);
   if (operation === "workspace.list") return isCatalog(value.data);
+  if (
+    operation === "context.browse" ||
+    operation === "context.capture" ||
+    operation === "context.list" ||
+    operation === "context.get" ||
+    operation === "context.validate"
+  )
+    return isContextResult(operation, value.data);
   if (!isProjectRecord(value.data)) return false;
   if (operation === "project.select")
     return value.data.cached === null || isGitObservation(value.data.cached);
   return isGitObservation(value.data);
 }
+import {
+  isContextResult,
+  parseContextRequest,
+  type ContextRequests,
+  type ContextResults,
+} from "./context.ts";
+
+export * from "./context.ts";

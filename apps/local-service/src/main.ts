@@ -2,6 +2,7 @@ import { createInterface } from "node:readline";
 import { once } from "node:events";
 import {
   isRecord,
+  isContextPath,
   isRequestId,
   maxIpcBytes,
   parseRequest,
@@ -10,11 +11,15 @@ import {
 } from "@laplace/contracts";
 import { GitError, inspectRepository } from "./git.ts";
 import { openCatalog } from "./catalog.ts";
+import { browseContext, captureContext } from "./context.ts";
 
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 const exit = new AbortController();
 input.once("close", () => exit.abort());
 const dataDir = process.argv[2] ?? "";
+const contextExclusions = (process.env.LAPLACE_CONTEXT_EXCLUDES ?? "")
+  .split(";")
+  .filter(isContextPath);
 let catalog: ReturnType<typeof openCatalog> | undefined;
 
 class CatalogError extends Error {}
@@ -72,6 +77,77 @@ async function respond(line: string): Promise<Response> {
       return { ...envelope, operation: request.operation, ok: true, data };
     }
     const project = withCatalog((store) => store.lookup(request.projectId));
+    switch (request.operation) {
+      case "context.list": {
+        const data = withCatalog((store) =>
+          store.context.list(project.id, request.before),
+        );
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
+      case "context.get": {
+        const data = withCatalog((store) =>
+          store.context.get(project.id, request.contextId),
+        );
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
+      case "context.browse":
+      case "context.capture":
+      case "context.validate": {
+        const protectedRoots = withCatalog((store) => store.list().projects)
+          .filter((entry) => entry.id !== project.id)
+          .map((entry) => entry.root);
+        protectedRoots.push(dataDir);
+        const options = {
+          signal: exit.signal,
+          protectedRoots,
+          exclusions: contextExclusions,
+        };
+        if (request.operation === "context.browse") {
+          const data = await browseContext(
+            project,
+            request.folder,
+            request.prefix,
+            options,
+          );
+          return { ...envelope, operation: request.operation, ok: true, data };
+        }
+        if (request.operation === "context.capture") {
+          const capture = await captureContext(project, request.paths, options);
+          const data = withCatalog((store) => store.context.save(capture));
+          return { ...envelope, operation: request.operation, ok: true, data };
+        }
+        const saved = withCatalog((store) =>
+          store.context.get(project.id, request.contextId),
+        );
+        const current =
+          saved.status === "invalidated"
+            ? saved
+            : (
+                await captureContext(
+                  project,
+                  saved.entries.map((entry) => entry.path),
+                  options,
+                )
+              ).snapshot;
+        const state =
+          current.status === "invalidated"
+            ? "inconclusive"
+            : current.digest === saved.digest
+              ? "matches"
+              : "differs";
+        return {
+          ...envelope,
+          operation: request.operation,
+          ok: true,
+          data: {
+            projectId: project.id,
+            contextId: saved.contextId,
+            state,
+            checkedAt: new Date().toISOString(),
+          },
+        };
+      }
+    }
     if (request.operation === "project.relocate") {
       if (!project.identity) throw new GitError("project_identity_unknown");
       const inspection = await inspectRepository(request.path, {
@@ -114,8 +190,11 @@ async function serve() {
     console.error(
       `[laplace:service] ${response.id} ${outcome} ${Math.round(performance.now() - started)}ms`,
     );
-    if (!process.stdout.write(`${JSON.stringify(response)}\n`))
-      await once(process.stdout, "drain");
+    let packet = `${JSON.stringify(response)}\n`;
+    if (Buffer.byteLength(packet) > maxIpcBytes) {
+      packet = `${JSON.stringify({ id: response.id, version: protocolVersion, ok: false, error: { code: "context_limit" } })}\n`;
+    }
+    if (!process.stdout.write(packet)) await once(process.stdout, "drain");
   }
 }
 

@@ -36,6 +36,10 @@ pub enum ErrorCode {
     ServiceUnavailable,
     IpcTimeout,
     InvalidResponse,
+    ContextNotFound,
+    ContextPathUnavailable,
+    ContextTimeout,
+    ContextLimit,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -115,6 +119,17 @@ struct GitObservation {
     summary_version: u8,
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ContextPayload {
+    project_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    context_id: Option<String>,
+    // The shared TypeScript contract validates the versioned manifest and its entries.
+    #[serde(flatten)]
+    data: serde_json::Map<String, serde_json::Value>,
+}
+
 impl GitObservation {
     fn valid(&self) -> bool {
         self.source == "git.status" && self.summary_version == 1
@@ -136,6 +151,16 @@ enum Payload {
     Inspect(Project),
     #[serde(rename = "project.relocate")]
     Relocate(Project),
+    #[serde(rename = "context.browse")]
+    ContextBrowse(ContextPayload),
+    #[serde(rename = "context.capture")]
+    ContextCapture(ContextPayload),
+    #[serde(rename = "context.list")]
+    ContextList(ContextPayload),
+    #[serde(rename = "context.get")]
+    ContextGet(ContextPayload),
+    #[serde(rename = "context.validate")]
+    ContextValidate(ContextPayload),
 }
 
 impl Payload {
@@ -147,6 +172,11 @@ impl Payload {
             Self::Select(_) => "project.select",
             Self::Inspect(_) => "project.inspect",
             Self::Relocate(_) => "project.relocate",
+            Self::ContextBrowse(_) => "context.browse",
+            Self::ContextCapture(_) => "context.capture",
+            Self::ContextList(_) => "context.list",
+            Self::ContextGet(_) => "context.get",
+            Self::ContextValidate(_) => "context.validate",
         }
     }
 
@@ -165,6 +195,13 @@ impl Payload {
             }
             Self::Add(project) | Self::Inspect(project) | Self::Relocate(project) => {
                 project.record.valid() && project.summary.valid()
+            }
+            Self::ContextBrowse(data) | Self::ContextList(data) => {
+                valid_project_id(&data.project_id) && data.context_id.is_none()
+            }
+            Self::ContextCapture(data) | Self::ContextGet(data) | Self::ContextValidate(data) => {
+                valid_project_id(&data.project_id)
+                    && data.context_id.as_deref().is_some_and(valid_project_id)
             }
         }
     }
@@ -204,6 +241,16 @@ impl Response {
                             Payload::Select(project) => project.record.id == id,
                             Payload::Inspect(project) | Payload::Relocate(project) => {
                                 project.record.id == id
+                            }
+                            Payload::ContextBrowse(data)
+                            | Payload::ContextCapture(data)
+                            | Payload::ContextList(data)
+                            | Payload::ContextGet(data)
+                            | Payload::ContextValidate(data) => {
+                                data.project_id == id
+                                    && operation.snapshot_id().is_none_or(|context_id| {
+                                        data.context_id.as_deref() == Some(context_id)
+                                    })
                             }
                             _ => false,
                         })
@@ -247,6 +294,32 @@ pub enum Operation<'a> {
         project_id: &'a str,
         path: &'a str,
     },
+    #[serde(rename = "context.browse", rename_all = "camelCase")]
+    ContextBrowse {
+        project_id: &'a str,
+        folder: &'a str,
+        prefix: &'a str,
+    },
+    #[serde(rename = "context.capture", rename_all = "camelCase")]
+    ContextCapture {
+        project_id: &'a str,
+        paths: &'a [String],
+    },
+    #[serde(rename = "context.list", rename_all = "camelCase")]
+    ContextList {
+        project_id: &'a str,
+        before: Option<&'a str>,
+    },
+    #[serde(rename = "context.get", rename_all = "camelCase")]
+    ContextGet {
+        project_id: &'a str,
+        context_id: &'a str,
+    },
+    #[serde(rename = "context.validate", rename_all = "camelCase")]
+    ContextValidate {
+        project_id: &'a str,
+        context_id: &'a str,
+    },
 }
 
 impl<'a> Operation<'a> {
@@ -258,6 +331,11 @@ impl<'a> Operation<'a> {
             Self::Select { .. } => "project.select",
             Self::Inspect { .. } => "project.inspect",
             Self::Relocate { .. } => "project.relocate",
+            Self::ContextBrowse { .. } => "context.browse",
+            Self::ContextCapture { .. } => "context.capture",
+            Self::ContextList { .. } => "context.list",
+            Self::ContextGet { .. } => "context.get",
+            Self::ContextValidate { .. } => "context.validate",
         }
     }
 
@@ -265,7 +343,21 @@ impl<'a> Operation<'a> {
         match self {
             Self::Select { project_id }
             | Self::Inspect { project_id }
-            | Self::Relocate { project_id, .. } => Some(project_id),
+            | Self::Relocate { project_id, .. }
+            | Self::ContextBrowse { project_id, .. }
+            | Self::ContextCapture { project_id, .. }
+            | Self::ContextList { project_id, .. }
+            | Self::ContextGet { project_id, .. }
+            | Self::ContextValidate { project_id, .. } => Some(project_id),
+            _ => None,
+        }
+    }
+
+    fn snapshot_id(self) -> Option<&'a str> {
+        match self {
+            Self::ContextGet { context_id, .. } | Self::ContextValidate { context_id, .. } => {
+                Some(context_id)
+            }
             _ => None,
         }
     }

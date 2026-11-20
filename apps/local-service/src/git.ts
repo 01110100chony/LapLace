@@ -14,7 +14,7 @@ import {
 
 const exec = promisify(execFile);
 // Native resolution also returns the on-disk casing on Windows.
-const canonicalPath = promisify(realpath.native);
+export const canonicalPath = promisify(realpath.native);
 const gitDeadlineMs = 7_000;
 
 export class GitError extends Error {
@@ -139,10 +139,7 @@ function parseStatus(text: string): Omit<GitSummary, "observedAt"> {
   return { branch, head, changes };
 }
 
-export async function inspectRepository(
-  path: string,
-  options: GitOptions = {},
-): Promise<RepositoryInspection> {
+async function repositoryReader(path: string, options: GitOptions) {
   const deadline = AbortSignal.timeout(options.timeoutMs ?? gitDeadlineMs);
   const signal = options.signal
     ? AbortSignal.any([options.signal, deadline])
@@ -158,9 +155,11 @@ export async function inspectRepository(
     {
       noMatchIsEmpty = false,
       overrides = {},
+      maxBuffer = 16 * 1024 * 1024,
     }: {
       noMatchIsEmpty?: boolean;
       overrides?: NodeJS.ProcessEnv;
+      maxBuffer?: number;
     } = {},
   ): Promise<string> {
     try {
@@ -174,13 +173,16 @@ export async function inspectRepository(
           "core.fsmonitor=false",
           "-c",
           "core.untrackedCache=false",
+          "-c",
+          "core.hooksPath=" +
+            (process.platform === "win32" ? "NUL" : "/dev/null"),
           ...args,
         ],
         {
           env: { ...env, ...overrides },
           signal,
           windowsHide: true,
-          maxBuffer: 16 * 1024 * 1024,
+          maxBuffer,
         },
       );
       return stdout;
@@ -212,10 +214,13 @@ export async function inspectRepository(
   if (options.expectedRoot !== undefined && root !== options.expectedRoot)
     throw new GitError("project_unavailable");
 
-  async function checkoutIdentity() {
-    const gitDir = (
-      await run(root, ["rev-parse", "--absolute-git-dir"])
-    ).replace(/\r?\n$/, "");
+  async function checkoutLocation() {
+    const gitDir = await folder(
+      (await run(root, ["rev-parse", "--absolute-git-dir"])).replace(
+        /\r?\n$/,
+        "",
+      ),
+    );
     try {
       const locations = await Promise.all(
         [root, gitDir].map((location) => stat(location, { bigint: true })),
@@ -224,7 +229,12 @@ export async function inspectRepository(
       // worktrees. Git commit IDs alone cannot distinguish two copies.
       if (locations.some((entry) => !entry.isDirectory() || entry.ino === 0n))
         throw new GitError("project_identity_unknown");
-      return locations.map(({ dev, ino }) => `${dev}:${ino}`).join("/");
+      const identity = locations
+        .map(({ dev, ino }) => `${dev}:${ino}`)
+        .join("/");
+      if (options.expectedIdentity && options.expectedIdentity !== identity)
+        throw new GitError("project_identity_mismatch");
+      return { gitDir, identity };
     } catch (error) {
       if (error instanceof GitError) throw error;
       if (isMissing(error as NodeJS.ErrnoException))
@@ -235,9 +245,15 @@ export async function inspectRepository(
     }
   }
 
-  const identity = await checkoutIdentity();
-  if (options.expectedIdentity && options.expectedIdentity !== identity)
-    throw new GitError("project_identity_mismatch");
+  return { root, run, checkoutLocation };
+}
+
+export async function inspectRepository(
+  path: string,
+  options: GitOptions = {},
+): Promise<RepositoryInspection> {
+  const { root, run, checkoutLocation } = await repositoryReader(path, options);
+  const { identity } = await checkoutLocation();
   // Status may invoke configured clean/process filters when stat checks miss.
   const filters = await run(
     root,
@@ -276,7 +292,7 @@ export async function inspectRepository(
       { overrides },
     ),
   );
-  if ((await checkoutIdentity()) !== identity)
+  if ((await checkoutLocation()).identity !== identity)
     throw new GitError("project_identity_mismatch");
   return {
     name: basename(root) || root,
@@ -286,5 +302,51 @@ export async function inspectRepository(
     source: gitSource,
     summaryVersion: gitSummaryVersion,
     observedAt: new Date().toISOString(),
+  };
+}
+
+export async function contextCheckout(path: string, options: GitOptions) {
+  const { root, run, checkoutLocation } = await repositoryReader(path, options);
+  const { gitDir, identity } = await checkoutLocation();
+  return {
+    root,
+    gitDir,
+    identity,
+    async revision() {
+      const [branch, head] = await Promise.all([
+        run(root, ["symbolic-ref", "-q", "--short", "HEAD"], {
+          noMatchIsEmpty: true,
+          maxBuffer: 4096,
+        }),
+        run(root, ["rev-parse", "--verify", "--quiet", "HEAD"], {
+          noMatchIsEmpty: true,
+          maxBuffer: 1024,
+        }),
+      ]);
+      const oid = head.trimEnd();
+      if (oid ? !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(oid) : !branch)
+        throw new GitError("git_failed");
+      return { head: oid || null, branch: branch.trimEnd() || null };
+    },
+    indexEntries(paths: string[]) {
+      if (!paths.length) return Promise.resolve("");
+      const magic =
+        process.platform === "win32"
+          ? ":(top,literal,icase)"
+          : ":(top,literal)";
+      return run(
+        root,
+        [
+          "ls-files",
+          "--stage",
+          "-z",
+          "--",
+          ...paths.map((path) => magic + path),
+        ],
+        {
+          maxBuffer: 256 * 1024,
+        },
+      );
+    },
   };
 }

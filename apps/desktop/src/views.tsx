@@ -4,6 +4,9 @@ import type {
   Health,
   ProjectRecord,
 } from "@laplace/contracts";
+import { useState } from "react";
+import { ContextView } from "./ContextView";
+import type { createDesktopClient } from "./ipc";
 
 export type ServiceStatus =
   | { state: "loading" }
@@ -216,14 +219,17 @@ export function ProjectView({
   status,
   refresh,
   relocate,
+  contextClient,
 }: {
   project: ProjectRecord;
   summary: GitObservation | undefined;
   status: ProjectStatus;
   refresh: () => void;
   relocate: () => void;
+  contextClient: ReturnType<typeof createDesktopClient>["context"];
 }) {
   const loading = status.state === "loading";
+  const [section, setSection] = useState<"overview" | "context">("overview");
   return (
     <>
       <header className="headline project-headline">
@@ -244,7 +250,22 @@ export function ProjectView({
           Atualizar
         </button>
       </header>
-      <div className="project-view-label">Visão geral</div>
+      <nav className="project-sections" aria-label="Seções do projeto">
+        <button
+          className="button"
+          aria-current={section === "overview" ? "page" : undefined}
+          onClick={() => setSection("overview")}
+        >
+          Visão geral
+        </button>
+        <button
+          className="button"
+          aria-current={section === "context" ? "page" : undefined}
+          onClick={() => setSection("context")}
+        >
+          Contexto
+        </button>
+      </nav>
       {loading && (
         <p className="panel loading inspection-status" role="status">
           <span aria-hidden="true" /> Consultando o Git…
@@ -260,64 +281,78 @@ export function ProjectView({
           )}
         </div>
       )}
-      {summary && (
-        <>
-          <div className="project-grid">
-            <section className="panel" aria-labelledby="repo-heading">
-              <h2 id="repo-heading">Repositório Git</h2>
-              <dl className="repo-info">
-                <div>
-                  <dt>Branch</dt>
-                  <dd>
-                    <code>{branchLabel(summary)}</code>
-                  </dd>
-                </div>
-                <div>
-                  <dt>HEAD</dt>
-                  <dd>
-                    {summary.head ? <code>{summary.head}</code> : "Sem commits"}
-                  </dd>
-                </div>
-              </dl>
-            </section>
-            <section className="panel" aria-labelledby="changes-heading">
-              <h2 id="changes-heading">Alterações</h2>
-              <dl className="change-counts">
-                <div>
-                  <dt>Preparadas</dt>
-                  <dd>{summary.changes.staged}</dd>
-                </div>
-                <div>
-                  <dt>Não preparadas</dt>
-                  <dd>{summary.changes.unstaged}</dd>
-                </div>
-                <div>
-                  <dt>Não rastreadas</dt>
-                  <dd>{summary.changes.untracked}</dd>
-                </div>
-                {summary.changes.conflicted > 0 && (
+      {section === "context" ? (
+        <ContextView
+          key={project.root}
+          projectId={project.id}
+          client={contextClient}
+        />
+      ) : (
+        summary && (
+          <>
+            <div className="project-grid">
+              <section className="panel" aria-labelledby="repo-heading">
+                <h2 id="repo-heading">Repositório Git</h2>
+                <dl className="repo-info">
                   <div>
-                    <dt>Em conflito</dt>
-                    <dd>{summary.changes.conflicted}</dd>
+                    <dt>Branch</dt>
+                    <dd>
+                      <code>{branchLabel(summary)}</code>
+                    </dd>
                   </div>
+                  <div>
+                    <dt>HEAD</dt>
+                    <dd>
+                      {summary.head ? (
+                        <code>{summary.head}</code>
+                      ) : (
+                        "Sem commits"
+                      )}
+                    </dd>
+                  </div>
+                </dl>
+              </section>
+              <section className="panel" aria-labelledby="changes-heading">
+                <h2 id="changes-heading">Alterações</h2>
+                <dl className="change-counts">
+                  <div>
+                    <dt>Preparadas</dt>
+                    <dd>{summary.changes.staged}</dd>
+                  </div>
+                  <div>
+                    <dt>Não preparadas</dt>
+                    <dd>{summary.changes.unstaged}</dd>
+                  </div>
+                  <div>
+                    <dt>Não rastreadas</dt>
+                    <dd>{summary.changes.untracked}</dd>
+                  </div>
+                  {summary.changes.conflicted > 0 && (
+                    <div>
+                      <dt>Em conflito</dt>
+                      <dd>{summary.changes.conflicted}</dd>
+                    </div>
+                  )}
+                </dl>
+                {Object.values(summary.changes).every(
+                  (count) => count === 0,
+                ) && (
+                  <p className="clean">
+                    <span className="status-dot" aria-hidden="true" /> Árvore de
+                    trabalho limpa
+                  </p>
                 )}
-              </dl>
-              {Object.values(summary.changes).every((count) => count === 0) && (
-                <p className="clean">
-                  <span className="status-dot" aria-hidden="true" /> Árvore de
-                  trabalho limpa
-                </p>
-              )}
-            </section>
-          </div>
-          <p className="observed" role="status">
-            {status.state === "ready"
-              ? "Leitura atual do Git"
-              : "Última leitura do Git em cache"}
-            {" · "}
-            <ObservedTime summary={summary} />
-          </p>
-        </>
+              </section>
+            </div>
+            <p className="observed" role="status">
+              {status.state === "ready"
+                ? "Leitura atual do Git"
+                : "Última leitura do Git em cache"}
+              {" · "}
+              <ObservedTime summary={summary} />
+            </p>
+          </>
+        )
       )}
     </>
   );

@@ -12,12 +12,15 @@ type DesktopCommand =
   | "workspace_add_local"
   | "project_select"
   | "project_inspect"
-  | "project_relocate";
+  | "project_relocate"
+  | "context_browse"
+  | "context_capture"
+  | "context_list"
+  | "context_get"
+  | "context_validate";
 type PickerOperation = "workspace.addLocal" | "project.relocate";
-type Invoke = (
-  command: DesktopCommand,
-  args: Record<string, string>,
-) => Promise<unknown>;
+type InvokeArgs = Record<string, string | string[] | null>;
+type Invoke = (command: DesktopCommand, args: InvokeArgs) => Promise<unknown>;
 
 const commands: Record<Operation, DesktopCommand> = {
   health: "service_health",
@@ -26,6 +29,11 @@ const commands: Record<Operation, DesktopCommand> = {
   "project.select": "project_select",
   "project.inspect": "project_inspect",
   "project.relocate": "project_relocate",
+  "context.browse": "context_browse",
+  "context.capture": "context_capture",
+  "context.list": "context_list",
+  "context.get": "context_get",
+  "context.validate": "context_validate",
 };
 
 export class DesktopError extends Error {
@@ -40,15 +48,15 @@ export class DesktopError extends Error {
 export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
   async function request(
     operation: PickerOperation,
-    args?: Record<string, string>,
+    args?: InvokeArgs,
   ): Promise<Results[PickerOperation] | null>;
   async function request<K extends Exclude<Operation, PickerOperation>>(
     operation: K,
-    args?: Record<string, string>,
+    args?: InvokeArgs,
   ): Promise<Results[K]>;
   async function request<K extends Operation>(
     operation: K,
-    args: Record<string, string> = {},
+    args: InvokeArgs = {},
   ): Promise<Results[K] | null> {
     const id = crypto.randomUUID();
     const picker =
@@ -74,7 +82,17 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
       if (!response.ok) throw new DesktopError(response.error.code);
       if (
         args.projectId !== undefined &&
-        (!("id" in response.data) || response.data.id !== args.projectId)
+        ("projectId" in response.data
+          ? response.data.projectId
+          : "id" in response.data
+            ? response.data.id
+            : undefined) !== args.projectId
+      )
+        throw new DesktopError("invalid_response");
+      if (
+        args.contextId !== undefined &&
+        (!("contextId" in response.data) ||
+          response.data.contextId !== args.contextId)
       )
         throw new DesktopError("invalid_response");
       return response.data;
@@ -95,6 +113,18 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
     select: (projectId: string) => request("project.select", { projectId }),
     inspect: (projectId: string) => request("project.inspect", { projectId }),
     relocate: (projectId: string) => request("project.relocate", { projectId }),
+    context: {
+      browse: (projectId: string, folder: string, prefix: string) =>
+        request("context.browse", { projectId, folder, prefix }),
+      capture: (projectId: string, paths: string[]) =>
+        request("context.capture", { projectId, paths }),
+      list: (projectId: string, before: string | null = null) =>
+        request("context.list", { projectId, before }),
+      get: (projectId: string, contextId: string) =>
+        request("context.get", { projectId, contextId }),
+      validate: (projectId: string, contextId: string) =>
+        request("context.validate", { projectId, contextId }),
+    },
   };
 }
 
@@ -127,6 +157,10 @@ const messages: Record<ErrorCode, string> = {
   invalid_response:
     "O serviço local retornou uma resposta inválida. Tente novamente.",
   desktop_required: "Abra o aplicativo desktop para conectar ao serviço local.",
+  context_not_found: "A captura não foi encontrada neste projeto.",
+  context_path_unavailable: "A pasta está indisponível ou excluída da captura.",
+  context_timeout: "O tempo de leitura do contexto esgotou. Tente novamente.",
+  context_limit: "Os metadados excederam o limite do serviço local.",
 };
 
 export function errorMessage(error: unknown): string {

@@ -584,13 +584,155 @@ h1 {
   overflow-wrap: anywhere;
 }
 
-.project-view-label {
+.project-sections {
+  display: flex;
+  gap: 8px;
   margin-bottom: 22px;
   padding-bottom: 9px;
   border-bottom: 1px solid var(--rule);
+}
+
+.project-sections [aria-current="page"] {
+  background: var(--soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+#context-heading {
+  margin-bottom: 12px;
+}
+
+.context-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 15px;
+  align-items: start;
+  margin-bottom: 15px;
+}
+
+:where(.context-grid, .context-result) h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.context-toolbar,
+.context-form {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  overflow-wrap: anywhere;
+}
+
+.context-form label {
+  flex-basis: 100%;
   color: var(--sub);
   font-size: 13px;
-  font-weight: 550;
+}
+
+.context-form input {
+  min-width: 0;
+  flex: 1;
+  padding: 7px 9px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.context-files {
+  min-inline-size: 0;
+  max-height: 14rem;
+  overflow: auto;
+  margin: 12px 0 0;
+  padding: 4px 8px 8px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+}
+
+.context-files legend {
+  padding: 0 5px;
+  color: var(--sub);
+  font-size: 12px;
+}
+
+.context-file {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 4px 5px;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+
+.context-file input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.context-file:focus-within,
+.context-form input:focus-visible,
+.context-result summary:focus-visible,
+.context-selection summary:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+.context-selection {
+  margin: 12px 0;
+}
+
+:where(.context-selection, .context-result) summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--accent);
+}
+
+.context-list {
+  margin-top: 8px;
+}
+
+.context-history-row {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 8px;
+  border-bottom: 1px solid var(--rule);
+  text-align: start;
+}
+
+.context-history-row:hover,
+.context-history-row[aria-current="true"] {
+  background: var(--raised);
+}
+
+.context-history-row small,
+.context-entries p {
+  color: var(--sub);
+}
+
+.context-result .section-heading {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.context-entries > li {
+  padding: 9px 0;
+  border-top: 1px solid var(--rule);
+  overflow-wrap: anywhere;
+}
+
+.context-entries details {
+  margin-top: 4px;
+}
+
+@media (max-width: 920px) {
+  .context-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .project-grid {

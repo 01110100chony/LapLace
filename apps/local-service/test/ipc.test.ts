@@ -61,7 +61,7 @@ async function fixture(t: TestContext) {
         },
         async request<K extends Operation>(
           operation: K,
-          args: { path?: string; projectId?: string } = {},
+          args: Record<string, unknown> = {},
         ): Promise<Results[K]> {
           const id = `request-${++sequence}`;
           const response = await this.exchange({
@@ -150,7 +150,7 @@ test(
     try {
       assert.equal(
         database.prepare("PRAGMA user_version").get()?.user_version,
-        2,
+        3,
       );
     } finally {
       database.close();
@@ -543,7 +543,7 @@ test(
 
     const database = new DatabaseSync(env.database);
     try {
-      database.exec("PRAGMA user_version = 3");
+      database.exec("PRAGMA user_version = 4");
       const second = env.start();
       await assert.rejects(second.request("workspace.list"), {
         message: "catalog_unavailable",
@@ -551,9 +551,9 @@ test(
       await second.close();
       assert.equal(
         database.prepare("PRAGMA user_version").get()?.user_version,
-        3,
+        4,
       );
-      database.exec("PRAGMA user_version = 2");
+      database.exec("PRAGMA user_version = 3");
     } finally {
       database.close();
     }
@@ -561,5 +561,113 @@ test(
     const third = env.start();
     assert.deepEqual(await third.request("workspace.list"), saved);
     await third.close();
+  },
+);
+
+test(
+  "IPC de contexto resiste a reinício, movimento e troca de projeto",
+  { timeout: 30_000 },
+  async (t) => {
+    const env = await fixture(t);
+    const a = await env.repository("origem");
+    const b = await env.repository("outro projeto");
+    await writeFile(join(a, "readme.txt"), "primeira versão");
+    await writeFile(join(b, "readme.txt"), "outro conteúdo");
+    const service = env.start();
+    const addedA = await service.request("workspace.addLocal", { path: a });
+    const addedB = await service.request("workspace.addLocal", { path: b });
+    const projectId = addedA.id;
+    const otherId = addedB.id;
+    const list = await service.request("context.browse", {
+      projectId,
+      folder: "",
+      prefix: "",
+    });
+    assert.deepEqual(list.items, [{ path: "readme.txt", kind: "file" }]);
+    await assert.rejects(
+      service.request("context.capture", {
+        projectId: "f".repeat(64),
+        paths: ["readme.txt"],
+      }),
+      { message: "project_unavailable" },
+    );
+    await assert.rejects(
+      service.request("context.capture", {
+        projectId,
+        paths: ["../outro projeto/readme.txt"],
+      }),
+      { message: "invalid_request" },
+    );
+    const capture = await service.request("context.capture", {
+      projectId,
+      paths: ["readme.txt"],
+    });
+    const contextId = capture.contextId;
+    const getArgs = { projectId, contextId };
+    assert.equal(
+      (await service.request("context.validate", getArgs)).state,
+      "matches",
+    );
+    await service.request("project.select", { projectId: otherId });
+    assert.deepEqual(
+      (
+        await service.request("context.list", {
+          projectId: otherId,
+          before: null,
+        })
+      ).items,
+      [],
+    );
+    await assert.rejects(
+      service.request("context.get", { projectId: otherId, contextId }),
+      { message: "context_not_found" },
+    );
+    await assert.rejects(
+      service.request("context.list", {
+        projectId: otherId,
+        before: contextId,
+      }),
+      { message: "context_not_found" },
+    );
+    await writeFile(join(a, "readme.txt"), "segunda versão");
+    assert.equal(
+      (await service.request("context.validate", getArgs)).state,
+      "differs",
+    );
+    const newer = await service.request("context.capture", {
+      projectId,
+      paths: ["readme.txt"],
+    });
+    assert.notEqual(newer.digest, capture.digest);
+    await service.close();
+
+    const moved = join(env.root, "movido");
+    await rename(a, moved);
+    const reopened = env.start();
+    const history = await reopened.request("context.list", {
+      projectId,
+      before: null,
+    });
+    assert.deepEqual(
+      history.items.map((item) => item.contextId),
+      [newer.contextId, contextId],
+    );
+    assert.deepEqual(await reopened.request("context.get", getArgs), capture);
+    await assert.rejects(reopened.request("context.validate", getArgs), {
+      message: "project_unavailable",
+    });
+    await reopened.close();
+    const store = new DatabaseSync(env.database, { readOnly: true });
+    try {
+      const bytes = store
+        .prepare(
+          `SELECT b.bytes FROM context_blobs AS b
+      JOIN context_entries AS e ON e.blob_sha256 = b.sha256 WHERE e.context_id = ?`,
+        )
+        .get(contextId)?.bytes as Uint8Array;
+      assert.equal(Buffer.from(bytes).toString(), "primeira versão");
+    } finally {
+      store.close();
+    }
   },
 );

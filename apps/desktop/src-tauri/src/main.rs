@@ -114,6 +114,98 @@ async fn project_relocate(
     ))
 }
 
+#[tauri::command]
+async fn context_browse(
+    id: String,
+    project_id: String,
+    folder: String,
+    prefix: String,
+    sidecar: State<'_, Sidecar>,
+) -> Result<Response, Fault> {
+    Ok(sidecar
+        .request(
+            id,
+            Operation::ContextBrowse {
+                project_id: &project_id,
+                folder: &folder,
+                prefix: &prefix,
+            },
+        )
+        .await?)
+}
+
+#[tauri::command]
+async fn context_capture(
+    id: String,
+    project_id: String,
+    paths: Vec<String>,
+    sidecar: State<'_, Sidecar>,
+) -> Result<Response, Fault> {
+    Ok(sidecar
+        .request(
+            id,
+            Operation::ContextCapture {
+                project_id: &project_id,
+                paths: &paths,
+            },
+        )
+        .await?)
+}
+
+#[tauri::command]
+async fn context_list(
+    id: String,
+    project_id: String,
+    before: Option<String>,
+    sidecar: State<'_, Sidecar>,
+) -> Result<Response, Fault> {
+    Ok(sidecar
+        .request(
+            id,
+            Operation::ContextList {
+                project_id: &project_id,
+                before: before.as_deref(),
+            },
+        )
+        .await?)
+}
+
+#[tauri::command]
+async fn context_get(
+    id: String,
+    project_id: String,
+    context_id: String,
+    sidecar: State<'_, Sidecar>,
+) -> Result<Response, Fault> {
+    Ok(sidecar
+        .request(
+            id,
+            Operation::ContextGet {
+                project_id: &project_id,
+                context_id: &context_id,
+            },
+        )
+        .await?)
+}
+
+#[tauri::command]
+async fn context_validate(
+    id: String,
+    project_id: String,
+    context_id: String,
+    sidecar: State<'_, Sidecar>,
+) -> Result<Response, Fault> {
+    Ok(sidecar
+        .request(
+            id,
+            Operation::ContextValidate {
+                project_id: &project_id,
+                context_id: &context_id,
+            },
+        )
+        .await?)
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -134,7 +226,12 @@ fn main() {
             workspace_add_local,
             project_select,
             project_inspect,
-            project_relocate
+            project_relocate,
+            context_browse,
+            context_capture,
+            context_list,
+            context_get,
+            context_validate
         ])
         .build(tauri::generate_context!())
         .expect("falha ao inicializar a janela do Laplace");

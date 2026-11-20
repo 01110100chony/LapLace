@@ -195,11 +195,13 @@ export function App() {
         <main ref={main} id="content" tabIndex={-1} className="main">
           {active && selection ? (
             <ProjectView
+              key={active.id}
               project={active}
               summary={summaries[active.id]}
               status={selection.status}
               refresh={() => inspect(active)}
               relocate={() => relocateDialog.current?.showModal()}
+              contextClient={desktop.context}
             />
           ) : (
             <Home

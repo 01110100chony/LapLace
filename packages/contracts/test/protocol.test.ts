@@ -39,3 +39,41 @@ test("a resposta do catálogo deve corresponder ao pedido e referenciar um proje
     ),
   );
 });
+
+test("o IPC de contexto limita caminhos e seleção e rejeita cursores inválidos", () => {
+  const projectId = "a".repeat(64);
+  const request = {
+    ...envelope,
+    operation: "context.capture",
+    projectId,
+    paths: ["Pasta/ação.txt"],
+  };
+  assert.deepEqual(parseRequest(request), request);
+  for (const paths of [
+    [],
+    ["."],
+    ["a/../b"],
+    ["a/./b"],
+    ["a//b"],
+    ["/a"],
+    ["a\\b"],
+    ["C:/a"],
+    ["a:stream"],
+    ["a\0b"],
+    ["a."],
+    ["NUL.txt"],
+    ["é".repeat(193)],
+    ["dup.txt", "dup.txt"],
+    Array.from({ length: 33 }, (_, i) => `${i}.txt`),
+  ])
+    assert.equal(parseRequest({ ...request, paths }), undefined);
+  assert.equal(
+    parseRequest({
+      ...envelope,
+      operation: "context.list",
+      projectId,
+      before: "anything",
+    }),
+    undefined,
+  );
+});

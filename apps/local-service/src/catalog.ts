@@ -11,6 +11,7 @@ import {
   type SelectedProject,
 } from "@laplace/contracts";
 import { GitError, type RepositoryInspection } from "./git.ts";
+import { contextMigration, createContextStore } from "./context-store.ts";
 
 const migrations = [
   `CREATE TABLE projects (
@@ -32,6 +33,7 @@ const migrations = [
      observed_at TEXT NOT NULL,
      payload TEXT NOT NULL
    ) STRICT;`,
+  contextMigration,
 ];
 
 type RegisteredProject = ProjectRecord & { identity: string | null };
@@ -170,6 +172,11 @@ export function openCatalog(dataDir: string) {
     }
 
     return {
+      context: createContextStore(
+        database,
+        (write) => writeTransaction(database, write),
+        lookup,
+      ),
       list(): Catalog {
         const rows = list.all() as (ProjectRecord & {
           selectedProjectId: string | null;

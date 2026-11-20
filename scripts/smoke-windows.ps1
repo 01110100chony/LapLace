@@ -101,19 +101,33 @@ try {
     )
     Assert-Smoke ($selected.ok -and $selected.data.cached.head -eq $head -and
         $restored.ok -and $restored.data.projects.Count -eq 1 -and $restored.data.selectedProjectId -eq $id) 'Catalog or selection was lost between processes.'
+    $browse, $capture = Invoke-Sidecar @(
+        @{ operation = 'context.browse'; projectId = $id; folder = ''; prefix = '' },
+        @{ operation = 'context.capture'; projectId = $id; paths = @('untracked.txt') }
+    ) $gitPath
+    $fileHash = (Get-FileHash -LiteralPath (Join-Path $repo.FullName 'untracked.txt')).Hash.ToLowerInvariant()
+    Assert-Smoke ($browse.ok -and $browse.data.items[0].path -eq 'untracked.txt' -and
+        $capture.ok -and $capture.data.status -eq 'complete' -and $capture.data.head -eq $head -and
+        $capture.data.entries[0].sha256 -eq $fileHash) 'Installed sidecar could not capture the selected file.'
+    $contextId = $capture.data.contextId
     Rename-Item -LiteralPath $repo.FullName -NewName 'Moved repo'
-    $unavailable, $saved = Invoke-Sidecar @(
+    $unavailable, $saved, $history, $context = Invoke-Sidecar @(
         @{ operation = 'project.inspect'; projectId = $id },
-        @{ operation = 'workspace.list' }
+        @{ operation = 'workspace.list' },
+        @{ operation = 'context.list'; projectId = $id; before = $null },
+        @{ operation = 'context.get'; projectId = $id; contextId = $contextId }
     ) $gitPath
     Assert-Smoke (!$unavailable.ok -and $unavailable.error.code -eq 'project_unavailable' -and
         $saved.ok -and $saved.data.selectedProjectId -eq $id) 'Unavailable repository damaged persisted state.'
+    Assert-Smoke ($history.ok -and $history.data.items[0].contextId -eq $contextId -and
+        $context.ok -and $context.data.digest -eq $capture.data.digest -and
+        $context.data.entries[0].sha256 -eq $fileHash) 'Context history was lost between processes.'
 
     $db = Join-Path $data 'catalog.sqlite3'
     Assert-Smoke (Test-Path -LiteralPath $db -PathType Leaf) 'SQLite catalog was not created.'
     $sqlite = & $sidecar -e 'const {DatabaseSync} = require(''node:sqlite''); const db = new DatabaseSync(process.argv[1], { readOnly: true }); process.stdout.write(JSON.stringify({ version: process.versions.sqlite, journal: db.prepare(''PRAGMA journal_mode'').get().journal_mode, integrity: db.prepare(''PRAGMA integrity_check'').get().integrity_check })); db.close();' $db | ConvertFrom-Json
     Assert-Smoke ($LASTEXITCODE -eq 0 -and $sqlite.journal -eq 'delete' -and $sqlite.integrity -eq 'ok') 'Unexpected SQLite journal mode or integrity result.'
-    Write-Output "Smoke passed. Node.js $version, SQLite $($sqlite.version) ($($sqlite.journal)). IPC, Git, restart, recovery and EOF verified."
+    Write-Output "Smoke passed. Node.js $version, SQLite $($sqlite.version) ($($sqlite.journal)). IPC, Git, context capture, restart, recovery and EOF verified."
 } finally {
     if (Test-Path -LiteralPath $uninstaller -PathType Leaf) {
         $uninstall = Start-Process -FilePath $uninstaller -ArgumentList '/S' -WindowStyle Hidden -Wait -PassThru

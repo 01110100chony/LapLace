@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { protocolVersion } from "@laplace/contracts";
+import { protocolVersion, type ContextHistory } from "@laplace/contracts";
 import { createDesktopClient } from "../src/ipc.ts";
+import { createLatestRequest } from "../src/workspace.ts";
 
 test("correlaciona operação e ID e devolve a resposta do health check", async () => {
   const desktop = createDesktopClient(async (command, { id }) => {
@@ -81,4 +82,49 @@ test("rejeita dados de seleção de outro projeto mesmo com ID de IPC válido", 
   await assert.rejects(desktop.select("a".repeat(64)), {
     code: "invalid_response",
   });
+});
+
+test("troca rápida de projeto descarta histórico atrasado e rejeita respostas de outro contexto", async () => {
+  const a = "a".repeat(64);
+  const b = "b".repeat(64);
+  const c = "c".repeat(64);
+  let finishA!: () => void;
+  const savedA = new Promise<void>((resolve) => {
+    finishA = resolve;
+  });
+  const client = createDesktopClient(async (command, { id, projectId }) => {
+    if (command === "context_validate")
+      return {
+        version: protocolVersion,
+        id,
+        ok: true,
+        operation: "context.validate",
+        data: {
+          projectId,
+          contextId: b,
+          state: "matches",
+          checkedAt: "2026-11-20T10:00:00.000Z",
+        },
+      };
+    assert.equal(command, "context_list");
+    if (projectId === a) await savedA;
+    return {
+      version: protocolVersion,
+      id,
+      ok: true,
+      operation: "context.list",
+      data: { projectId, items: [], nextBefore: null },
+    };
+  }).context;
+  const latest = createLatestRequest();
+  const shown: string[] = [];
+  const render = (value: ContextHistory) => shown.push(value.projectId);
+  const fail = () => assert.fail("histórico inesperado");
+  const pending = latest.run(() => client.list(a), render, fail);
+  latest.invalidate();
+  await latest.run(() => client.list(b), render, fail);
+  finishA();
+  await pending;
+  assert.deepEqual(shown, [b]);
+  await assert.rejects(client.validate(a, c), { code: "invalid_response" });
 });
