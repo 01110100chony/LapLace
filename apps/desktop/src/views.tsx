@@ -283,7 +283,7 @@ export function ProjectView({
       )}
       {section === "context" ? (
         <ContextView
-          key={project.root}
+          key={`${project.id}/${project.root}`}
           projectId={project.id}
           client={contextClient}
         />

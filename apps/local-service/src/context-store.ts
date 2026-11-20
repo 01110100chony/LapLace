@@ -211,11 +211,19 @@ export function createContextStore(
       };
     },
     get,
-    readSource(projectId: string, contextId: string, path: string) {
+    readSource(
+      projectId: string,
+      contextId: string,
+      path: string,
+      expectedDigest?: string,
+    ) {
       const entry = get(projectId, contextId).entries.find(
         (entry) => entry.path === path,
       );
-      if (entry?.outcome !== "included")
+      if (
+        entry?.outcome !== "included" ||
+        (expectedDigest && entry.sha256 !== expectedDigest)
+      )
         throw new GitError("context_not_found");
       const bytes = getBlob.get(entry.sha256)?.bytes as Uint8Array | undefined;
       if (

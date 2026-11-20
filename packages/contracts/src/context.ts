@@ -1,4 +1,10 @@
 import { isProjectId, isRecord } from "./index.ts";
+import {
+  isContextSearchResult,
+  parseContextSearchRequest,
+  type ContextSearchRequests,
+  type ContextSearchResults,
+} from "./context-search.ts";
 
 export const contextSchemaVersion = 1;
 export const maxContextFiles = 32;
@@ -77,6 +83,7 @@ export type ContextValidation = {
 };
 
 export type ContextRequests =
+  | ContextSearchRequests
   | {
       operation: "context.browse";
       projectId: string;
@@ -91,7 +98,7 @@ export type ContextRequests =
       contextId: string;
     };
 
-export type ContextResults = {
+export type ContextResults = ContextSearchResults & {
   "context.browse": ContextBrowse;
   "context.capture": ContextSnapshot;
   "context.list": ContextHistory;
@@ -155,6 +162,9 @@ export function parseContextRequest(
     case "context.validate":
       if (isProjectId(value.contextId))
         return { operation, projectId, contextId: value.contextId };
+      break;
+    default:
+      return parseContextSearchRequest(value, projectId);
   }
 }
 
@@ -164,7 +174,7 @@ function isOid(value: unknown) {
   );
 }
 
-function isDate(value: unknown) {
+export function isContextDate(value: unknown) {
   return (
     typeof value === "string" &&
     /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) &&
@@ -176,7 +186,7 @@ function isSize(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 
-function isSummary(
+export function isContextSummary(
   value: unknown,
 ): value is ContextSummary & Record<string, unknown> {
   return (
@@ -185,7 +195,7 @@ function isSummary(
     isProjectId(value.contextId) &&
     isProjectId(value.projectId) &&
     (value.head === null || isOid(value.head)) &&
-    isDate(value.completedAt) &&
+    isContextDate(value.completedAt) &&
     isProjectId(value.digest) &&
     isSize(value.included) &&
     isSize(value.omitted) &&
@@ -231,7 +241,7 @@ function isEntry(value: unknown): value is ContextEntry {
 }
 
 export function isContextSnapshot(value: unknown): value is ContextSnapshot {
-  if (!isSummary(value)) return false;
+  if (!isContextSummary(value)) return false;
   const {
     entries,
     issue,
@@ -247,7 +257,7 @@ export function isContextSnapshot(value: unknown): value is ContextSnapshot {
     typeof worktreeIdentity !== "string" ||
     !worktreeIdentity ||
     !(branch === null || (typeof branch === "string" && branch.length > 0)) ||
-    !isDate(startedAt) ||
+    !isContextDate(startedAt) ||
     !Array.isArray(entries) ||
     !entries.every(isEntry) ||
     entries.length !== value.included + value.omitted ||
@@ -288,7 +298,8 @@ export function isContextResult(
         Array.isArray(items) &&
         items.length <= contextHistoryLimit &&
         items.every(
-          (item: unknown) => isSummary(item) && item.projectId === projectId,
+          (item: unknown) =>
+            isContextSummary(item) && item.projectId === projectId,
         ) &&
         (nextBefore === null ||
           (isProjectId(nextBefore) && items.at(-1)?.contextId === nextBefore))
@@ -300,10 +311,12 @@ export function isContextResult(
     case "context.validate":
       return (
         isProjectId(value.contextId) &&
-        isDate(value.checkedAt) &&
+        isContextDate(value.checkedAt) &&
         (value.state === "matches" ||
           value.state === "differs" ||
           value.state === "inconclusive")
       );
+    default:
+      return isContextSearchResult(operation, value);
   }
 }

@@ -11,6 +11,10 @@ fn main() {
         "context_list",
         "context_get",
         "context_validate",
+        "context_index_status",
+        "context_index",
+        "context_search",
+        "context_source_preview",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(commands))
         .expect("falha ao configurar o host Tauri");

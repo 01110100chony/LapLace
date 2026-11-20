@@ -128,3 +128,73 @@ test("troca rápida de projeto descarta histórico atrasado e rejeita respostas 
   assert.deepEqual(shown, [b]);
   await assert.rejects(client.validate(a, c), { code: "invalid_response" });
 });
+
+test("descarta busca atrasada ao trocar de projeto e rejeita prévia de outro trecho", async () => {
+  const a = "a".repeat(64);
+  const b = "b".repeat(64);
+  const contextId = "c".repeat(64);
+  const sha256 = "d".repeat(64);
+  let resolve!: () => void;
+  const promise = new Promise<void>((finish) => {
+    resolve = finish;
+  });
+  const client = createDesktopClient(
+    async (command, { id, projectId, path }) => {
+      const envelope = { version: protocolVersion, id, ok: true };
+      if (command === "context_source_preview")
+        return {
+          ...envelope,
+          operation: "context.sourcePreview",
+          data: {
+            projectId,
+            contextId,
+            path,
+            sha256,
+            chunk: 1,
+            firstLine: 1,
+            lastLine: 1,
+            splitLine: false,
+            text: "Outro trecho",
+          },
+        };
+      assert.equal(command, "context_search");
+      if (projectId === a) await promise;
+      return {
+        ...envelope,
+        operation: "context.search",
+        data: {
+          projectId,
+          scope: "history",
+          contextId: null,
+          snapshot: null,
+          eligible: 0,
+          indexed: 0,
+          items: [],
+          nextOffset: null,
+        },
+      };
+    },
+  ).context;
+  const search = createLatestRequest();
+  const input = {
+    scope: "history",
+    contextId: null,
+    query: "alvo",
+    offset: 0,
+  } as const;
+  const rendered: string[] = [];
+  const render = (data: { projectId: string }) => rendered.push(data.projectId);
+  const fail = () => assert.fail("busca inesperada");
+  const pending = search.run(() => client.search(a, input), render, fail);
+  search.invalidate();
+  await search.run(() => client.search(b, input), render, fail);
+  resolve();
+  await pending;
+  assert.deepEqual(rendered, [b]);
+  await assert.rejects(
+    client.preview(b, { contextId, sha256, path: "a.ts", chunk: 0 }),
+    {
+      code: "invalid_response",
+    },
+  );
+});

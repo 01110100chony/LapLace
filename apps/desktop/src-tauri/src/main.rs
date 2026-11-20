@@ -2,7 +2,7 @@
 
 mod ipc;
 
-use ipc::{ErrorCode, Fault, Operation, Response, Sidecar};
+use ipc::{ErrorCode, Fault, Operation, Response, SearchScope, Sidecar};
 use tauri::{path::BaseDirectory, Manager, RunEvent, State, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
 
@@ -206,6 +206,96 @@ async fn context_validate(
         .await?)
 }
 
+#[tauri::command]
+async fn context_index_status(
+    id: String,
+    project_id: String,
+    context_id: Option<String>,
+    sidecar: State<'_, Sidecar>,
+) -> Result<Response, Fault> {
+    sidecar
+        .request(
+            id,
+            Operation::ContextIndexStatus {
+                project_id: &project_id,
+                context_id: context_id.as_deref(),
+            },
+        )
+        .await
+        .map_err(Fault::from)
+}
+
+#[tauri::command]
+async fn context_index(
+    id: String,
+    project_id: String,
+    context_id: String,
+    force: bool,
+    sidecar: State<'_, Sidecar>,
+) -> Result<Response, Fault> {
+    sidecar
+        .request(
+            id,
+            Operation::ContextIndex {
+                project_id: &project_id,
+                context_id: &context_id,
+                force,
+            },
+        )
+        .await
+        .map_err(Fault::from)
+}
+
+#[tauri::command]
+async fn context_search(
+    id: String,
+    project_id: String,
+    scope: SearchScope,
+    context_id: Option<String>,
+    query: String,
+    offset: u32,
+    sidecar: State<'_, Sidecar>,
+) -> Result<Response, Fault> {
+    sidecar
+        .request(
+            id,
+            Operation::ContextSearch {
+                project_id: &project_id,
+                context_id: context_id.as_deref(),
+                scope,
+                query: &query,
+                offset,
+            },
+        )
+        .await
+        .map_err(Fault::from)
+}
+
+#[tauri::command]
+async fn context_source_preview(
+    id: String,
+    project_id: String,
+    context_id: String,
+    path: String,
+    sha256: String,
+    chunk: u32,
+    sidecar: State<'_, Sidecar>,
+) -> Result<Response, Fault> {
+    sidecar
+        .request(
+            id,
+            Operation::ContextSourcePreview {
+                project_id: &project_id,
+                context_id: &context_id,
+                path: &path,
+                sha256: &sha256,
+                chunk,
+            },
+        )
+        .await
+        .map_err(Fault::from)
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -231,7 +321,11 @@ fn main() {
             context_capture,
             context_list,
             context_get,
-            context_validate
+            context_validate,
+            context_index_status,
+            context_index,
+            context_search,
+            context_source_preview
         ])
         .build(tauri::generate_context!())
         .expect("falha ao inicializar a janela do Laplace");

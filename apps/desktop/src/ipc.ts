@@ -1,6 +1,9 @@
 import {
   isIpcError,
   isResponse,
+  contextSearchPageSize,
+  type ContextSearchInput,
+  type ContextSourceRef,
   type ErrorCode,
   type Operation,
   type Results,
@@ -17,9 +20,13 @@ type DesktopCommand =
   | "context_capture"
   | "context_list"
   | "context_get"
-  | "context_validate";
+  | "context_validate"
+  | "context_index_status"
+  | "context_index"
+  | "context_search"
+  | "context_source_preview";
 type PickerOperation = "workspace.addLocal" | "project.relocate";
-type InvokeArgs = Record<string, string | string[] | null>;
+type InvokeArgs = Record<string, string | string[] | number | boolean | null>;
 type Invoke = (command: DesktopCommand, args: InvokeArgs) => Promise<unknown>;
 
 const commands: Record<Operation, DesktopCommand> = {
@@ -34,6 +41,10 @@ const commands: Record<Operation, DesktopCommand> = {
   "context.list": "context_list",
   "context.get": "context_get",
   "context.validate": "context_validate",
+  "context.indexStatus": "context_index_status",
+  "context.index": "context_index",
+  "context.search": "context_search",
+  "context.sourcePreview": "context_source_preview",
 };
 
 export class DesktopError extends Error {
@@ -90,7 +101,7 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
       )
         throw new DesktopError("invalid_response");
       if (
-        args.contextId !== undefined &&
+        typeof args.contextId === "string" &&
         (!("contextId" in response.data) ||
           response.data.contextId !== args.contextId)
       )
@@ -124,6 +135,39 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
         request("context.get", { projectId, contextId }),
       validate: (projectId: string, contextId: string) =>
         request("context.validate", { projectId, contextId }),
+      indexStatus: (projectId: string, contextId: string | null) =>
+        request("context.indexStatus", { projectId, contextId }),
+      index: (projectId: string, contextId: string, force: boolean) =>
+        request("context.index", { projectId, contextId, force }),
+      async search(projectId: string, input: ContextSearchInput) {
+        const result = await request("context.search", { projectId, ...input });
+        if (
+          result.scope !== input.scope ||
+          (result.nextOffset !== null &&
+            result.nextOffset !== input.offset + contextSearchPageSize)
+        )
+          throw new DesktopError("invalid_response");
+        return result;
+      },
+      async preview(
+        projectId: string,
+        { contextId, path, sha256, chunk }: ContextSourceRef,
+      ) {
+        const result = await request("context.sourcePreview", {
+          projectId,
+          contextId,
+          path,
+          sha256,
+          chunk,
+        });
+        if (
+          result.path !== path ||
+          result.sha256 !== sha256 ||
+          result.chunk !== chunk
+        )
+          throw new DesktopError("invalid_response");
+        return result;
+      },
     },
   };
 }
@@ -161,6 +205,16 @@ const messages: Record<ErrorCode, string> = {
   context_path_unavailable: "A pasta está indisponível ou excluída da captura.",
   context_timeout: "O tempo de leitura do contexto esgotou. Tente novamente.",
   context_limit: "Os metadados excederam o limite do serviço local.",
+  context_not_eligible:
+    "Esta captura não tem fontes preservadas que possam ser indexadas.",
+  context_not_indexed:
+    "Esta captura ainda não tem índice. Indexe-a para pesquisar.",
+  context_index_failed:
+    "Falha ao gravar o índice da captura. Tente indexar novamente.",
+  context_search_query:
+    "Informe entre 1 e 12 termos de busca com letras ou números.",
+  context_source_unavailable:
+    "A fonte preservada está indisponível ou não passou na verificação de integridade.",
 };
 
 export function errorMessage(error: unknown): string {

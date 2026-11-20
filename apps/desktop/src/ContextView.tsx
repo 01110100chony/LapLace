@@ -11,6 +11,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type createDesktopClient, errorMessage } from "./ipc";
 import { createLatestRequest } from "./workspace";
+import { ContextSearchView } from "./ContextSearchView";
 
 type Client = ReturnType<typeof createDesktopClient>["context"];
 type Load<T> =
@@ -259,6 +260,12 @@ export function ContextView({
   return (
     <section aria-labelledby="context-heading">
       <h2 id="context-heading">Contexto</h2>
+      <ContextSearchView
+        key={`${projectId}/${snapshot?.contextId ?? ""}`}
+        projectId={projectId}
+        client={client}
+        selected={snapshot}
+      />
       <div className="context-grid">
         <section className="panel" aria-labelledby="context-sources">
           <h3 id="context-sources">Fontes da árvore de trabalho</h3>

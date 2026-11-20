@@ -7,6 +7,9 @@ import {
   mkdtemp,
   mkdir,
   rename,
+  readFile,
+  stat,
+  unlink,
   rm,
   symlink,
   writeFile,
@@ -19,6 +22,10 @@ import { test, type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   isResponse,
+  contextSearchPageSize,
+  maxContextQueryBytes,
+  maxContextSearchOffset,
+  maxContextSnippetBytes,
   protocolVersion,
   type Operation,
   type Results,
@@ -150,7 +157,7 @@ test(
     try {
       assert.equal(
         database.prepare("PRAGMA user_version").get()?.user_version,
-        3,
+        4,
       );
     } finally {
       database.close();
@@ -543,7 +550,7 @@ test(
 
     const database = new DatabaseSync(env.database);
     try {
-      database.exec("PRAGMA user_version = 4");
+      database.exec("PRAGMA user_version = 5");
       const second = env.start();
       await assert.rejects(second.request("workspace.list"), {
         message: "catalog_unavailable",
@@ -551,9 +558,9 @@ test(
       await second.close();
       assert.equal(
         database.prepare("PRAGMA user_version").get()?.user_version,
-        4,
+        5,
       );
-      database.exec("PRAGMA user_version = 3");
+      database.exec("PRAGMA user_version = 4");
     } finally {
       database.close();
     }
@@ -561,6 +568,377 @@ test(
     const third = env.start();
     assert.deepEqual(await third.request("workspace.list"), saved);
     await third.close();
+  },
+);
+
+test(
+  "migra o catálogo C01 e pesquisa revisões preservadas por projeto, inclusive após reiniciar",
+  { timeout: 45_000 },
+  async (t) => {
+    const env = await fixture(t);
+    const root = await env.repository("Projeto C02");
+    const secondRoot = await env.repository("Outro projeto");
+    const path = "Ação com espaços.ts";
+    const otherPath = "notes.ts";
+    const original =
+      "export function calcularTotal() {\r\n  return 'revisão antiga';\r\n}\r\n";
+    const newer =
+      "export function calcularTotal() {\n  return 'revisão nova';\n}\n";
+    await writeFile(join(root, path), original);
+    await writeFile(join(root, otherPath), "Ação com espaços\n");
+    await writeFile(
+      join(secondRoot, path),
+      original.replace("antiga", "privada"),
+    );
+    git(root, "add", "--", path, otherPath);
+    git(root, "commit", "--quiet", "-m", "base");
+    const indexPath = join(root, ".git", "index");
+    const indexBytes = await readFile(indexPath);
+    const indexTime = (await stat(indexPath, { bigint: true })).mtimeNs;
+    const first = env.start();
+    const project = await first.request("workspace.addLocal", { path: root });
+    const projectId = project.id;
+    const paths = [path, otherPath];
+    const old = await first.request("context.capture", { projectId, paths });
+    await first.close();
+
+    // Restore the C01 schema in this disposable copy with real receipts and blobs.
+    using database = new DatabaseSync(env.database);
+    database.exec(`
+    DROP TRIGGER context_search_delete_chunk;
+    DROP TABLE context_fts;
+    DROP TABLE context_search_chunks;
+    DROP TABLE context_search_documents;
+    DROP TABLE context_search_indexes;
+    DROP INDEX context_entries_search_source;
+    PRAGMA user_version = 3;
+  `);
+    const service = env.start();
+    assert.deepEqual(
+      await service.request("context.get", {
+        projectId,
+        contextId: old.contextId,
+      }),
+      old,
+    );
+    assert.equal(
+      (await service.request("workspace.list")).selectedProjectId,
+      projectId,
+    );
+    assert.equal(
+      database.prepare("PRAGMA user_version").get()?.user_version,
+      4,
+    );
+    assert.equal(
+      database
+        .prepare("SELECT sqlite_compileoption_used('ENABLE_FTS5') AS enabled")
+        .get()?.enabled,
+      1,
+    );
+    assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
+
+    const search = (
+      scope: "snapshot" | "latest" | "history",
+      query: string,
+      contextId: string | null = null,
+    ) =>
+      service.request("context.search", {
+        projectId,
+        scope,
+        contextId,
+        query,
+        offset: 0,
+      });
+    const build = (contextId: string, force = false) =>
+      service.request("context.index", { projectId, contextId, force });
+    assert.equal(
+      (
+        await service.request("context.indexStatus", {
+          projectId,
+          contextId: null,
+        })
+      ).indexedAt,
+      null,
+    );
+    await assert.rejects(search("latest", "calcularTotal"), {
+      message: "context_not_indexed",
+    });
+    const ready = await build(old.contextId);
+    assert.equal(ready.files, 2);
+    assert.equal(ready.chunks, 2);
+    assert.deepEqual(await build(old.contextId), ready);
+    const duplicate = await service.request("context.capture", {
+      projectId,
+      paths,
+    });
+    await build(duplicate.contextId);
+    await build(old.contextId, true);
+    assert.equal(
+      database.prepare("SELECT count(*) AS n FROM context_fts").get()?.n,
+      2,
+    );
+    assert.equal(
+      database
+        .prepare("SELECT count(*) AS n FROM context_search_documents")
+        .get()?.n,
+      2,
+    );
+
+    const ranked = await search("snapshot", "acao com espacos", old.contextId);
+    assert.deepEqual(
+      ranked.items.map((item) => item.path),
+      [path, otherPath],
+    );
+    const [hit] = (await search("snapshot", "revisao antiga", old.contextId))
+      .items;
+    assert.ok(hit);
+    assert.equal(hit.contextId, old.contextId);
+    assert.equal(hit.origin, "historical");
+    assert.equal(hit.snapshot.head, old.head);
+    assert.equal(hit.text, original);
+    assert.deepEqual([hit.firstLine, hit.lastLine], [1, 3]);
+    const ref = {
+      projectId,
+      contextId: hit.contextId,
+      path,
+      sha256: hit.sha256,
+      chunk: hit.chunk,
+    };
+    assert.equal(
+      (await service.request("context.sourcePreview", ref)).text,
+      original,
+    );
+    assert.equal(await readFile(join(root, path), "utf8"), original);
+    assert.deepEqual(await readFile(indexPath), indexBytes);
+    assert.equal((await stat(indexPath, { bigint: true })).mtimeNs, indexTime);
+
+    await unlink(join(root, path));
+    assert.equal((await search("history", "calcularTotal")).items.length, 2);
+    assert.equal(
+      (await service.request("context.sourcePreview", ref)).text,
+      original,
+    );
+    await writeFile(join(root, path), newer);
+    const recent = await service.request("context.capture", {
+      projectId,
+      paths,
+    });
+    await assert.rejects(search("latest", "calcularTotal"), {
+      message: "context_not_indexed",
+    });
+    await build(recent.contextId);
+    const latest = await search("latest", "calcularTotal");
+    assert.equal(latest.snapshot?.contextId, recent.contextId);
+    assert.deepEqual(
+      latest.items.map((item) => [item.origin, item.text]),
+      [["latest", newer]],
+    );
+    const historical = await search("history", "calcularTotal");
+    assert.deepEqual(
+      new Set(historical.items.map((item) => item.contextId)),
+      new Set([old.contextId, duplicate.contextId, recent.contextId]),
+    );
+
+    const other = await service.request("workspace.addLocal", {
+      path: secondRoot,
+    });
+    const otherSnapshot = await service.request("context.capture", {
+      projectId: other.id,
+      paths: [path],
+    });
+    await service.request("context.index", {
+      projectId: other.id,
+      contextId: otherSnapshot.contextId,
+      force: false,
+    });
+    assert.equal((await search("history", "privada")).items.length, 0);
+    assert.equal(
+      (
+        await service.request("context.search", {
+          projectId: other.id,
+          scope: "history",
+          contextId: null,
+          query: "calcularTotal",
+          offset: 0,
+        })
+      ).items[0]?.contextId,
+      otherSnapshot.contextId,
+    );
+    await assert.rejects(
+      search("snapshot", "calcularTotal", otherSnapshot.contextId),
+      { message: "context_not_found" },
+    );
+    await assert.rejects(
+      service.request("context.sourcePreview", { ...ref, projectId: other.id }),
+      { message: "context_source_unavailable" },
+    );
+    await assert.rejects(
+      service.request("context.sourcePreview", {
+        ...ref,
+        sha256: "0".repeat(64),
+      }),
+      {
+        message: "context_source_unavailable",
+      },
+    );
+    await service.close();
+    const restarted = env.start();
+    assert.deepEqual(
+      await restarted.request("context.search", {
+        projectId,
+        scope: "latest",
+        contextId: null,
+        query: "calcularTotal",
+        offset: 0,
+      }),
+      latest,
+    );
+    await restarted.close();
+  },
+);
+
+test(
+  "limita a busca e a paginação, trata sintaxe como texto e recupera falhas de indexação",
+  { timeout: 35_000 },
+  async (t) => {
+    const env = await fixture(t);
+    const root = await env.repository("Limites");
+    const path = "linhas.ts";
+    const contents =
+      "alvo\r\n".repeat(24 * (contextSearchPageSize + 2)) +
+      "é".repeat(511) +
+      "\r\n" +
+      "😀".repeat(512) +
+      " final UNICO\n";
+    await writeFile(join(root, path), contents);
+    await writeFile(join(root, "outro.txt"), "NEAR OR");
+    await writeFile(join(root, ".env"), "omissaoteste");
+    const service = env.start();
+    const { id: projectId } = await service.request("workspace.addLocal", {
+      path: root,
+    });
+    const capture = await service.request("context.capture", {
+      projectId,
+      paths: [path, "outro.txt", ".env"],
+    });
+    const args = { projectId, contextId: capture.contextId };
+    const search = (query: string, offset = 0) =>
+      service.request("context.search", {
+        ...args,
+        scope: "snapshot",
+        query,
+        offset,
+      });
+    const index = (force = false) =>
+      service.request("context.index", { ...args, force });
+    assert.equal(capture.status, "partial");
+    using database = new DatabaseSync(env.database, {
+      enableForeignKeyConstraints: false,
+    });
+    function failWrite() {
+      database.exec(`CREATE TRIGGER reject_chunk BEFORE INSERT ON context_search_chunks WHEN NEW.ordinal = 2
+      BEGIN SELECT RAISE(ABORT, 'fixture'); END;`);
+    }
+    failWrite();
+    await assert.rejects(index(), { message: "context_index_failed" });
+    assert.equal(
+      database.prepare("SELECT count(*) AS n FROM context_fts").get()?.n,
+      0,
+    );
+    assert.equal(
+      database
+        .prepare("SELECT count(*) AS n FROM context_search_documents")
+        .get()?.n,
+      0,
+    );
+    assert.equal(
+      (await service.request("context.indexStatus", args)).indexedAt,
+      null,
+    );
+    database.exec("DROP TRIGGER reject_chunk");
+    const ready = await index();
+    assert.equal(ready.files, 2);
+    failWrite();
+    await assert.rejects(index(true), { message: "context_index_failed" });
+    assert.deepEqual(await service.request("context.indexStatus", args), ready);
+    database.exec("DROP TRIGGER reject_chunk");
+
+    const first = await search("alvo");
+    assert.equal(first.items.length, contextSearchPageSize);
+    assert.equal(first.nextOffset, contextSearchPageSize);
+    const next = await search("alvo", first.nextOffset!);
+    assert.equal(next.items.length, 2);
+    assert.equal(next.nextOffset, null);
+    assert.deepEqual(
+      [...first.items, ...next.items]
+        .map((item) => item.firstLine)
+        .sort((a, b) => a - b),
+      Array.from({ length: contextSearchPageSize + 2 }, (_, i) => 1 + 24 * i),
+    );
+    const one = (await search("UNICO")).items[0]!;
+    assert.ok(one.splitLine);
+    assert.equal(one.firstLine, one.lastLine);
+    assert.ok(!one.text.includes("\ufffd"));
+    assert.ok(Buffer.byteLength(one.text) <= maxContextSnippetBytes);
+    assert.match(one.text, / final UNICO\n$/);
+    assert.equal((await search('NEAR("OR"*):{}')).items[0]?.path, "outro.txt");
+    for (const term of ["omissaoteste", "env"])
+      assert.equal((await search(term)).items.length, 0);
+    await assert.rejects(search('(*")'), { message: "context_search_query" });
+    await assert.rejects(search("alvo ".repeat(13)), {
+      message: "context_search_query",
+    });
+    await assert.rejects(search("á".repeat(maxContextQueryBytes / 2 + 1)), {
+      message: "invalid_request",
+    });
+    await assert.rejects(search("alvo", 1), { message: "invalid_request" });
+    await assert.rejects(
+      search("alvo", maxContextSearchOffset + contextSearchPageSize),
+      { message: "invalid_request" },
+    );
+
+    const empty = await service.request("context.capture", {
+      projectId,
+      paths: ["ausente.ts"],
+    });
+    await assert.rejects(
+      service.request("context.index", {
+        projectId,
+        contextId: empty.contextId,
+        force: false,
+      }),
+      {
+        message: "context_not_eligible",
+      },
+    );
+    const latest = await service.request("context.indexStatus", {
+      projectId,
+      contextId: null,
+    });
+    assert.equal(latest.contextId, capture.contextId);
+    const { contextId, sha256, chunk } = one;
+    const ref = { projectId, contextId, path, sha256, chunk };
+    const saved = database
+      .prepare("SELECT bytes FROM context_blobs WHERE sha256 = ?")
+      .get(sha256)?.bytes as Uint8Array;
+    // Same-length damage still fails the digest check.
+    database
+      .prepare("UPDATE context_blobs SET bytes = ? WHERE sha256 = ?")
+      .run(Buffer.alloc(saved.length, 65), sha256);
+    await assert.rejects(service.request("context.sourcePreview", ref), {
+      message: "context_source_unavailable",
+    });
+    await assert.rejects(search("UNICO"), {
+      message: "context_source_unavailable",
+    });
+    database.prepare("DELETE FROM context_blobs WHERE sha256 = ?").run(sha256);
+    await assert.rejects(service.request("context.sourcePreview", ref), {
+      message: "context_source_unavailable",
+    });
+    await assert.rejects(index(true), {
+      message: "context_source_unavailable",
+    });
+    await service.close();
   },
 );
 

@@ -23,6 +23,11 @@ export const errorCodes = [
   "context_path_unavailable",
   "context_timeout",
   "context_limit",
+  "context_not_eligible",
+  "context_not_indexed",
+  "context_index_failed",
+  "context_search_query",
+  "context_source_unavailable",
 ] as const;
 
 export type ErrorCode = (typeof errorCodes)[number];
@@ -209,7 +214,11 @@ export function isResponse<K extends Operation>(
     operation === "context.capture" ||
     operation === "context.list" ||
     operation === "context.get" ||
-    operation === "context.validate"
+    operation === "context.validate" ||
+    operation === "context.indexStatus" ||
+    operation === "context.index" ||
+    operation === "context.search" ||
+    operation === "context.sourcePreview"
   )
     return isContextResult(operation, value.data);
   if (!isProjectRecord(value.data)) return false;
@@ -225,3 +234,4 @@ import {
 } from "./context.ts";
 
 export * from "./context.ts";
+export * from "./context-search.ts";

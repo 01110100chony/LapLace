@@ -12,6 +12,10 @@ import {
 } from "@laplace/contracts";
 import { GitError, type RepositoryInspection } from "./git.ts";
 import { contextMigration, createContextStore } from "./context-store.ts";
+import {
+  contextSearchMigration,
+  createContextSearch,
+} from "./context-search.ts";
 
 const migrations = [
   `CREATE TABLE projects (
@@ -34,6 +38,7 @@ const migrations = [
      payload TEXT NOT NULL
    ) STRICT;`,
   contextMigration,
+  contextSearchMigration,
 ];
 
 type RegisteredProject = ProjectRecord & { identity: string | null };
@@ -53,10 +58,14 @@ function readObservation(
   }
 }
 
-function writeTransaction<T>(database: DatabaseSync, write: () => T): T {
-  database.exec("BEGIN IMMEDIATE");
+function transaction<T>(
+  database: DatabaseSync,
+  run: () => T,
+  mode: "read" | "write",
+): T {
+  database.exec(mode === "write" ? "BEGIN IMMEDIATE" : "BEGIN");
   try {
-    const result = write();
+    const result = run();
     database.exec("COMMIT");
     return result;
   } catch (error) {
@@ -74,9 +83,11 @@ export function openCatalog(dataDir: string) {
     enableForeignKeyConstraints: true,
     timeout: 2_000,
   });
+  const write = <T>(run: () => T) => transaction(database, run, "write");
+  const read = <T>(run: () => T) => transaction(database, run, "read");
 
   try {
-    writeTransaction(database, () => {
+    write(() => {
       const { user_version: version } = database
         .prepare("PRAGMA user_version")
         .get() as { user_version: number };
@@ -171,12 +182,10 @@ export function openCatalog(dataDir: string) {
       return { id: project.id, name: project.name, root, ...summary };
     }
 
+    const context = createContextStore(database, write, lookup);
     return {
-      context: createContextStore(
-        database,
-        (write) => writeTransaction(database, write),
-        lookup,
-      ),
+      context,
+      contextSearch: createContextSearch(database, context, read, write),
       list(): Catalog {
         const rows = list.all() as (ProjectRecord & {
           selectedProjectId: string | null;
@@ -188,7 +197,7 @@ export function openCatalog(dataDir: string) {
       },
       add(inspection: RepositoryInspection): Project {
         const { name, root, identity } = inspection;
-        return writeTransaction(database, () => {
+        return write(() => {
           const existing = byRoot.get(root) as RegisteredProject | undefined;
           if (!existing && byIdentity.get(identity))
             throw new GitError("project_already_registered");
@@ -206,7 +215,7 @@ export function openCatalog(dataDir: string) {
       },
       lookup,
       select(id: string): SelectedProject {
-        return writeTransaction(database, () => {
+        return write(() => {
           const { name, root, identity } = lookup(id);
           setSelection.run(id);
           const entry = cached.get(id, root, identity);
@@ -222,7 +231,7 @@ export function openCatalog(dataDir: string) {
         previous: RegisteredProject,
         inspection: RepositoryInspection,
       ): Project {
-        return writeTransaction(database, () => {
+        return write(() => {
           const current = lookup(previous.id);
           if (current.root !== previous.root)
             throw new GitError("project_unavailable");

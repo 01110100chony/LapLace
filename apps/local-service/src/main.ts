@@ -78,6 +78,40 @@ async function respond(line: string): Promise<Response> {
     }
     const project = withCatalog((store) => store.lookup(request.projectId));
     switch (request.operation) {
+      case "context.indexStatus": {
+        const data = withCatalog((store) =>
+          store.contextSearch.status(project.id, request.contextId),
+        );
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
+      case "context.index": {
+        const data = withCatalog((store) =>
+          store.contextSearch.index(
+            project.id,
+            request.contextId,
+            request.force,
+          ),
+        );
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
+      case "context.search": {
+        const data = withCatalog((store) =>
+          store.contextSearch.search(project.id, request),
+        );
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
+      case "context.sourcePreview": {
+        const { contextId, path, sha256, chunk } = request;
+        const data = withCatalog((store) =>
+          store.contextSearch.preview(project.id, {
+            contextId,
+            path,
+            sha256,
+            chunk,
+          }),
+        );
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
       case "context.list": {
         const data = withCatalog((store) =>
           store.context.list(project.id, request.before),

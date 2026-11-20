@@ -40,6 +40,11 @@ pub enum ErrorCode {
     ContextPathUnavailable,
     ContextTimeout,
     ContextLimit,
+    ContextNotEligible,
+    ContextNotIndexed,
+    ContextIndexFailed,
+    ContextSearchQuery,
+    ContextSourceUnavailable,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -123,7 +128,6 @@ struct GitObservation {
 #[serde(rename_all = "camelCase")]
 struct ContextPayload {
     project_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
     context_id: Option<String>,
     // The shared TypeScript contract validates the versioned manifest and its entries.
     #[serde(flatten)]
@@ -161,6 +165,14 @@ enum Payload {
     ContextGet(ContextPayload),
     #[serde(rename = "context.validate")]
     ContextValidate(ContextPayload),
+    #[serde(rename = "context.indexStatus")]
+    ContextIndexStatus(ContextPayload),
+    #[serde(rename = "context.index")]
+    ContextIndex(ContextPayload),
+    #[serde(rename = "context.search")]
+    ContextSearch(ContextPayload),
+    #[serde(rename = "context.sourcePreview")]
+    ContextSourcePreview(ContextPayload),
 }
 
 impl Payload {
@@ -177,6 +189,10 @@ impl Payload {
             Self::ContextList(_) => "context.list",
             Self::ContextGet(_) => "context.get",
             Self::ContextValidate(_) => "context.validate",
+            Self::ContextIndexStatus(_) => "context.indexStatus",
+            Self::ContextIndex(_) => "context.index",
+            Self::ContextSearch(_) => "context.search",
+            Self::ContextSourcePreview(_) => "context.sourcePreview",
         }
     }
 
@@ -199,7 +215,16 @@ impl Payload {
             Self::ContextBrowse(data) | Self::ContextList(data) => {
                 valid_project_id(&data.project_id) && data.context_id.is_none()
             }
-            Self::ContextCapture(data) | Self::ContextGet(data) | Self::ContextValidate(data) => {
+            Self::ContextSearch(data) => {
+                valid_project_id(&data.project_id)
+                    && data.context_id.as_deref().is_none_or(valid_project_id)
+            }
+            Self::ContextCapture(data)
+            | Self::ContextGet(data)
+            | Self::ContextValidate(data)
+            | Self::ContextIndexStatus(data)
+            | Self::ContextIndex(data)
+            | Self::ContextSourcePreview(data) => {
                 valid_project_id(&data.project_id)
                     && data.context_id.as_deref().is_some_and(valid_project_id)
             }
@@ -246,7 +271,11 @@ impl Response {
                             | Payload::ContextCapture(data)
                             | Payload::ContextList(data)
                             | Payload::ContextGet(data)
-                            | Payload::ContextValidate(data) => {
+                            | Payload::ContextValidate(data)
+                            | Payload::ContextIndexStatus(data)
+                            | Payload::ContextIndex(data)
+                            | Payload::ContextSearch(data)
+                            | Payload::ContextSourcePreview(data) => {
                                 data.project_id == id
                                     && operation.snapshot_id().is_none_or(|context_id| {
                                         data.context_id.as_deref() == Some(context_id)
@@ -267,6 +296,14 @@ struct Request<'a> {
     id: &'a str,
     #[serde(flatten)]
     operation: Operation<'a>,
+}
+
+#[derive(Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SearchScope {
+    Snapshot,
+    Latest,
+    History,
 }
 
 #[derive(Clone, Copy, Serialize)]
@@ -320,6 +357,33 @@ pub enum Operation<'a> {
         project_id: &'a str,
         context_id: &'a str,
     },
+    #[serde(rename = "context.indexStatus", rename_all = "camelCase")]
+    ContextIndexStatus {
+        project_id: &'a str,
+        context_id: Option<&'a str>,
+    },
+    #[serde(rename = "context.index", rename_all = "camelCase")]
+    ContextIndex {
+        project_id: &'a str,
+        context_id: &'a str,
+        force: bool,
+    },
+    #[serde(rename = "context.search", rename_all = "camelCase")]
+    ContextSearch {
+        project_id: &'a str,
+        context_id: Option<&'a str>,
+        scope: SearchScope,
+        query: &'a str,
+        offset: u32,
+    },
+    #[serde(rename = "context.sourcePreview", rename_all = "camelCase")]
+    ContextSourcePreview {
+        project_id: &'a str,
+        context_id: &'a str,
+        path: &'a str,
+        sha256: &'a str,
+        chunk: u32,
+    },
 }
 
 impl<'a> Operation<'a> {
@@ -336,6 +400,10 @@ impl<'a> Operation<'a> {
             Self::ContextList { .. } => "context.list",
             Self::ContextGet { .. } => "context.get",
             Self::ContextValidate { .. } => "context.validate",
+            Self::ContextIndexStatus { .. } => "context.indexStatus",
+            Self::ContextIndex { .. } => "context.index",
+            Self::ContextSearch { .. } => "context.search",
+            Self::ContextSourcePreview { .. } => "context.sourcePreview",
         }
     }
 
@@ -348,16 +416,23 @@ impl<'a> Operation<'a> {
             | Self::ContextCapture { project_id, .. }
             | Self::ContextList { project_id, .. }
             | Self::ContextGet { project_id, .. }
-            | Self::ContextValidate { project_id, .. } => Some(project_id),
+            | Self::ContextValidate { project_id, .. }
+            | Self::ContextIndexStatus { project_id, .. }
+            | Self::ContextIndex { project_id, .. }
+            | Self::ContextSearch { project_id, .. }
+            | Self::ContextSourcePreview { project_id, .. } => Some(project_id),
             _ => None,
         }
     }
 
     fn snapshot_id(self) -> Option<&'a str> {
         match self {
-            Self::ContextGet { context_id, .. } | Self::ContextValidate { context_id, .. } => {
-                Some(context_id)
-            }
+            Self::ContextGet { context_id, .. }
+            | Self::ContextValidate { context_id, .. }
+            | Self::ContextIndex { context_id, .. }
+            | Self::ContextSourcePreview { context_id, .. } => Some(context_id),
+            Self::ContextIndexStatus { context_id, .. }
+            | Self::ContextSearch { context_id, .. } => context_id,
             _ => None,
         }
     }

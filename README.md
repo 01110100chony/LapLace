@@ -96,6 +96,41 @@ A política padrão bloqueia `.git`, dependências (`node_modules`, `vendor`, `.
 
 Os limites padrão são **32 arquivos**, **256 KiB por fonte**, **2 MiB por captura**, **10 s por operação de leitura**, **384 bytes UTF-8 por caminho**, **2.048 entradas examinadas por pasta**, **100 candidatos por resposta** e **20 capturas por página**. O limite IPC permanece em **192 KiB** por mensagem. O prazo é conferido entre operações de leitura. O supervisor do host encerra o sidecar se uma operação pendente ultrapassar o prazo de transporte. Trocar de projeto descarta as respostas da tela anterior e a operação mantém o ID de origem.
 
+## Busca nas capturas (C02)
+
+Abra **Contexto** e selecione arquivos em **Fontes da árvore de trabalho**. Após **Capturar contexto**, clique em **Indexar captura** em **Buscar nas capturas**. Digite um nome de arquivo, caminho ou termo do código e clique em **Pesquisar**. Abra o intervalo de linhas de um resultado para conferir o trecho, o ID completo da captura, o HEAD observado e o SHA-256 da fonte. **Reindexar captura** reconstrói o índice da captura selecionada.
+
+- **Captura selecionada** pesquisa a captura aberta no histórico ou recém-criada.
+- **Captura mais recente** pesquisa a última captura válida ou parcial que contém fontes preservadas. Caso ela ainda precise ser indexada, o aplicativo informa o estado dessa captura.
+- **Histórico do projeto** pesquisa as capturas elegíveis já indexadas e informa a cobertura. Cada resultado tem sua captura identificada. Uma captura parcial inclui somente as fontes que conseguiu preservar.
+
+O C02 depende do C01, commit `479a3e5` de `feat/context-snapshot`. A migração **4** do catálogo adiciona as tabelas `context_search_indexes`, `context_search_documents`, `context_search_chunks` e o índice virtual `context_fts`. A criação do esquema preserva os recibos e blobs C01 existentes. A primeira indexação é sob demanda. Capturas subsequentes reaproveitam os trechos e as entradas FTS para o mesmo projeto, caminho e SHA-256. A gravação e a reindexação são transacionais. Se uma falha interrompe a primeira gravação, ela fica disponível para nova tentativa. Se uma reindexação falha, o índice confirmado anterior permanece disponível.
+
+O FTS5 guarda termos de nome, caminho e texto. Listagem e prévia reabrem os bytes do C01 e verificam o manifesto, a referência e o SHA-256. A árvore de trabalho pode mudar ou ficar indisponível após a captura. Os trechos têm até 24 linhas e 1.024 bytes UTF-8, preservam LF e CRLF e indicam quando contêm parte de uma linha longa. Uma linha longa é indexada em segmentos contíguos. Termos que cruzam o limite entre dois trechos podem exigir uma consulta menor.
+
+O ranking usa BM25 com maior peso para o nome do arquivo, seguido do caminho e do conteúdo. Nome e caminho são indexados no trecho inicial para evitar resultados repetidos quando o termo aparece apenas no nome. A consulta combina até 12 termos literais em um mesmo trecho, com comparação insensível a caixa e a acentos latinos. O limite é de 256 bytes UTF-8. Cada página tem até 20 trechos, com até 200 resultados navegáveis. Novas indexações podem alterar as páginas de uma consulta histórica. O FTS5 compartilha as estatísticas de ranking do catálogo, enquanto os termos do projeto e os vínculos SQLite restringem os resultados ao projeto solicitado. [Referência do SQLite FTS5](https://www.sqlite.org/fts5.html)
+
+| Operação IPC v2         | Entrada além do ID do projeto                                  | Resposta                                                                      |
+| ----------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `context.indexStatus`   | ID da captura ou `null` para a mais recente elegível           | Elegibilidade, data da indexação e contagens                                  |
+| `context.index`         | ID da captura e opção `force`                                  | Estado confirmado do índice                                                   |
+| `context.search`        | Consulta, escopo, ID quando o escopo é uma captura, offset     | Página de trechos com caminho, linhas, SHA-256, captura e indicação de origem |
+| `context.sourcePreview` | ID da captura, caminho preservado, SHA-256 e ordinal do trecho | Trecho verificado dentro do orçamento de IPC                                  |
+
+O esquema e as validações de IPC estão em `packages/contracts/src/context-search.ts`. O serviço usa `context-search.ts` e `context-chunks.ts`, a janela usa `ContextSearchView.tsx` e o host Tauri expõe os quatro comandos no IPC existente. As operações são assíncronas na janela. A escrita é serializada no sidecar e tem orçamento de 10 s, além do prazo de transporte do host. O teste do instalador também pesquisa e abre uma captura após reiniciar o sidecar com o checkout indisponível.
+
+### Roteiro de validação C02
+
+1. Cadastre um repositório descartável com dois arquivos, como `calculo.ts` com `calcularTotal` e `config.ts`. Selecione os dois, capture e indexe.
+2. Pesquise `calcularTotal`, abra o intervalo de linhas e confira a versão preservada.
+3. Edite o retorno de `calcularTotal` no repositório descartável. Repita a busca na captura anterior. A prévia deve mostrar o retorno original.
+4. Capture e indexe novamente. Pesquise `calcularTotal` em **Histórico do projeto** e confira os dois retornos com IDs distintos. Em **Captura mais recente**, confira apenas a nova revisão.
+5. Feche e abra o Laplace, entre em **Contexto** e repita a consulta.
+
+Na janela Tauri GNU x64, o roteiro foi executado com o catálogo separado `br.laplace.desktop.c02smoke`. A busca por `calcularTotal` abriu `calculo.ts` nas linhas 1–3. Após editar a fixture, a prévia antiga permaneceu idêntica. O histórico mostrou as duas revisões e, após fechar e reabrir o Laplace, a busca padrão mostrou a revisão mais recente. Na mesma sessão, o sidecar registrou 18–22 ms para indexar as duas fontes, 1–5 ms para buscar e 1–2 ms para abrir uma prévia. As medições correspondem à fixture de dois arquivos.
+
+Os testes de IPC cobrem a migração de um catálogo C01, deduplicação, isolamento entre projetos, ranking, CRLF, acentos, paginação, capturas parciais e invalidadas, omissões, recuperação da transação e perda ou corrupção da fonte. O renderer testa o descarte de respostas atrasadas na troca de projeto. O build e o smoke locais GNU x64 passaram com o Node 24.22.3 e o SQLite 3.54.1. O CI hospedado MSVC ainda não foi executado para C02.
+
 ## Verificação
 
 ```powershell

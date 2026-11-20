@@ -339,6 +339,18 @@ test("invalida a geração inteira se uma fonte muda ou desaparece entre leitura
   );
   assert.equal(capture.blobs.size, 0);
   store.context.save(capture);
+  assert.equal(
+    store.contextSearch.status(checkout.id, capture.snapshot.contextId)
+      .eligible,
+    false,
+  );
+  assert.throws(
+    () =>
+      store.contextSearch.index(checkout.id, capture.snapshot.contextId, false),
+    {
+      code: "context_not_eligible",
+    },
+  );
   const retry = await captureContext(checkout, ["a.txt", "b.txt"]);
   assert.equal(retry.snapshot.status, "partial");
   assert.deepEqual(retry.snapshot.entries[1], {

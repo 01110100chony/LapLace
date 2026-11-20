@@ -610,7 +610,7 @@ h1 {
   margin-bottom: 15px;
 }
 
-:where(.context-grid, .context-result) h3 {
+:where(.context-grid, .context-result, .context-search) h3 {
   margin: 0;
   font-size: 16px;
 }
@@ -631,7 +631,7 @@ h1 {
   font-size: 13px;
 }
 
-.context-form input {
+.context-form :is(input, select) {
   min-width: 0;
   flex: 1;
   padding: 7px 9px;
@@ -674,7 +674,7 @@ h1 {
 }
 
 .context-file:focus-within,
-.context-form input:focus-visible,
+.context-form :is(input, select):focus-visible,
 .context-result summary:focus-visible,
 .context-selection summary:focus-visible {
   outline: 2px solid var(--focus);
@@ -717,6 +717,33 @@ h1 {
 .context-result .section-heading {
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.context-search {
+  margin-bottom: 14px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.context-search-results > li {
+  border-top: 1px solid var(--rule);
+  padding-top: 10px;
+}
+
+.context-search h4 {
+  margin: 0;
+}
+
+.context-search pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 11rem;
+  overflow: auto;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  line-height: 1.45;
 }
 
 .context-entries > li {
