@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "br.laplace.desktop",
   "build": {
-    "beforeDevCommand": "pnpm prepare:sidecar && pnpm dev:web",
+    "beforeDevCommand": "pnpm prepare:sidecar:dev && pnpm dev:web",
     "devUrl": "http://127.0.0.1:1420",
     "beforeBuildCommand": "pnpm prepare:sidecar && pnpm build:web",
     "frontendDist": "../dist"

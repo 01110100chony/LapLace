@@ -1,5 +1,7 @@
 import { createInterface } from "node:readline";
 import { once } from "node:events";
+import { isAbsolute } from "node:path";
+import { codexMockScenarios } from "@laplace/agents/mock";
 import {
   isRecord,
   isContextPath,
@@ -12,11 +14,30 @@ import {
 import { GitError, inspectRepository } from "./git.ts";
 import { openCatalog } from "./catalog.ts";
 import { browseContext, captureContext } from "./context.ts";
-import { CodexQueries, prepareCodex } from "./codex.ts";
+import { CodexQueries, prepareCodex, type CodexDevelopment } from "./codex.ts";
+
+// Defined when the sidecar is bundled. The source entry point and the
+// distribution bundle ignore all development arguments.
+declare const __LAPLACE_DEVELOPMENT__: boolean;
+
+function developmentFromHost([mode, value]: string[]):
+  CodexDevelopment | undefined {
+  if (mode === "--codex-mock") {
+    const scenario = codexMockScenarios.find((scenario) => scenario === value);
+    if (scenario) return { mode: "mock_development", scenario };
+  }
+  if (mode === "--codex-workspace" && value && isAbsolute(value))
+    return { mode: "unconfined_workspace_development", helper: value };
+}
 
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 const exit = new AbortController();
-const codex = new CodexQueries();
+const codex = new CodexQueries({
+  development:
+    typeof __LAPLACE_DEVELOPMENT__ !== "undefined" && __LAPLACE_DEVELOPMENT__
+      ? developmentFromHost(process.argv.slice(3))
+      : undefined,
+});
 input.once("close", () => {
   exit.abort();
   codex.close();
@@ -89,7 +110,7 @@ async function respond(line: string): Promise<Response> {
       }
       case "codex.prepare": {
         const material = withCatalog((store) =>
-          prepareCodex(store, request, dataDir),
+          prepareCodex(store, request, dataDir, codex.mode),
         );
         return {
           ...envelope,
@@ -97,6 +118,10 @@ async function respond(line: string): Promise<Response> {
           ok: true,
           data: codex.prepare(material),
         };
+      }
+      case "codex.approval": {
+        const data = codex.approval(request);
+        return { ...envelope, operation: request.operation, ok: true, data };
       }
       case "codex.start": {
         if (exit.signal.aborted)

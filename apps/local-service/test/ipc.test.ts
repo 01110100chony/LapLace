@@ -29,6 +29,7 @@ import {
   maxContextSnippetBytes,
   protocolVersion,
   type CodexEvent,
+  type CodexMode,
   type Operation,
   type Results,
 } from "@laplace/contracts";
@@ -1223,8 +1224,8 @@ test(
     const tree = git(root, "status", "--porcelain");
     await service.close();
 
-    const catalog = openCatalog(env.dataDir);
-    const prepared = (() => {
+    function prepare(mode: CodexMode) {
+      const catalog = openCatalog(env.dataDir);
       try {
         return prepareCodex(
           catalog,
@@ -1237,18 +1238,24 @@ test(
             ],
           },
           env.dataDir,
+          mode,
         );
       } finally {
         catalog.close();
       }
-    })();
+    }
+    const prepared = prepare("verified_isolated");
+    const detect = async () => ({
+      availability: {
+        state: "confinement_unverified" as const,
+        version: "0.141.0",
+      },
+      installation: { executable: process.execPath, version: "0.141.0" },
+    });
     let workspacePath = "";
     let launched = 0;
     const queries = new CodexQueries({
-      detect: async () => ({
-        availability: { state: "confinement_unverified", version: "0.141.0" },
-        installation: { executable: process.execPath, version: "0.141.0" },
-      }),
+      detect,
       boundary: {
         async verify() {
           return true;
@@ -1338,6 +1345,136 @@ test(
     assert.equal(
       await readFile(join(root, sourcePath), "utf8"),
       "// versão atual\n",
+    );
+
+    const blocked = new CodexQueries({ detect });
+    t.after(() => blocked.close());
+    assert.equal(
+      (await blocked.status(projectId)).state,
+      "confinement_unverified",
+    );
+    assert.throws(
+      () => blocked.prepare(prepare("unconfined_workspace_development")),
+      {
+        message: "codex_selection_invalid",
+      },
+    );
+    const strict = blocked.prepare(prepared);
+    await assert.rejects(
+      blocked.start({
+        ...approval,
+        grantId: strict.grantId,
+        unconfinedConfirmed: true,
+      }),
+      {
+        message: "codex_unavailable",
+      },
+    );
+
+    const workspace = new CodexQueries({
+      development: {
+        mode: "unconfined_workspace_development",
+        helper: join(env.root, "missing.exe"),
+      },
+      detect: async (_cwd, options) => {
+        assert.equal(options?.workspace, true);
+        return detect();
+      },
+    });
+    t.after(() => workspace.close());
+    const workspacePreview = workspace.prepare(prepare(workspace.mode));
+    const workspaceRequest = {
+      ...approval,
+      grantId: workspacePreview.grantId,
+      manifestDigest: workspacePreview.manifestDigest,
+    };
+    const details = workspace.approval({
+      ...workspaceRequest,
+      operation: "codex.approval",
+    });
+    assert.equal(details.mode, "unconfined_workspace_development");
+    assert.equal(details.snapshotDigest, snapshot.digest);
+    assert.deepEqual(details.sources, [
+      { path: sourcePath, bytes: Buffer.byteLength(result.text) },
+    ]);
+    assert.equal((await workspace.status(projectId)).state, "workspace_ready");
+    await assert.rejects(workspace.start(workspaceRequest), {
+      message: "codex_authorization_required",
+    });
+    const real = await workspace.start({
+      ...workspaceRequest,
+      unconfinedConfirmed: true,
+    });
+    assert.equal(real.mode, "unconfined_workspace_development");
+    await assert.rejects(
+      workspace.start({ ...workspaceRequest, unconfinedConfirmed: true }),
+      { message: "codex_authorization_required" },
+    );
+    let failed = workspace.events({
+      ...real,
+      operation: "codex.events",
+      afterSeq: 0,
+    });
+    while (failed.state === "running") {
+      await delay(10);
+      failed = workspace.events({
+        ...real,
+        operation: "codex.events",
+        afterSeq: 0,
+      });
+    }
+    assert.deepEqual(failed.events.at(-1), {
+      seq: 1,
+      type: "terminal",
+      state: "failed",
+      failure: "launch_failed",
+    });
+    assert.equal(git(root, "status", "--porcelain"), tree);
+    assert.equal(
+      await readFile(join(root, sourcePath), "utf8"),
+      "// versão atual\n",
+    );
+
+    const mock = new CodexQueries({
+      development: { mode: "mock_development", scenario: "late_after_cancel" },
+      detect: async () => assert.fail("mock called the CLI detector"),
+    });
+    t.after(() => mock.close());
+    assert.deepEqual(await mock.status(projectId), {
+      projectId,
+      mode: "mock_development",
+      state: "mock_ready",
+      version: null,
+    });
+    const simulatedPreview = mock.prepare(prepare(mock.mode));
+    assert.equal(simulatedPreview.provider, "mock");
+    const simulated = await mock.start({
+      ...approval,
+      grantId: simulatedPreview.grantId,
+      manifestDigest: simulatedPreview.manifestDigest,
+    });
+    const poll = {
+      ...simulated,
+      operation: "codex.events",
+      afterSeq: 0,
+    } as const;
+    assert.throws(() => mock.events({ ...poll, projectId: "b".repeat(64) }), {
+      message: "codex_execution_unavailable",
+    });
+    assert.throws(
+      () => mock.events({ ...poll, executionId: real.executionId }),
+      {
+        message: "codex_execution_unavailable",
+      },
+    );
+    mock.cancel({ ...simulated, operation: "codex.cancel" });
+    await delay(0);
+    const cancelled = mock.events(poll);
+    assert.equal(cancelled.mode, "mock_development");
+    assert.equal(cancelled.state, "cancelled");
+    assert.deepEqual(
+      cancelled.events.map(({ type }) => type),
+      ["started", "session", "progress", "terminal"],
     );
   },
 );

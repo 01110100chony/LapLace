@@ -13,6 +13,7 @@ import {
   CodexJsonl,
   detectCodex,
   runCodex,
+  workspaceCodexExecArgs,
   type CodexRunEvent,
   type VerifiedCodexBoundary,
 } from "../src/codex.ts";
@@ -31,9 +32,15 @@ const lines = [
 ];
 
 test("detects absent, unsupported, unauthenticated and recognized Codex", async () => {
-  const state = async (version: string, authenticated: boolean) =>
+  const state = async (
+    version: string,
+    authenticated: boolean,
+    workspace = false,
+    missingOption?: string,
+  ) =>
     (
       await detectCodex(tmpdir(), {
+        workspace,
         find: () => "fixture",
         call: async (_path, args) => {
           if (args.includes("--version"))
@@ -41,7 +48,9 @@ test("detects absent, unsupported, unauthenticated and recognized Codex", async 
           if (args.includes("--help"))
             return {
               code: 0,
-              stdout: codexExecArgs("fixture").join(" ") + " stdin --config",
+              stdout: [...codexExecArgs("fixture"), "stdin", "--config"]
+                .filter((option) => option !== missingOption)
+                .join(" "),
               stderr: "",
             };
           return authenticated
@@ -57,6 +66,12 @@ test("detects absent, unsupported, unauthenticated and recognized Codex", async 
   assert.equal(await state("0.140.0", true), "unsupported");
   assert.equal(await state("0.141.0", false), "unauthenticated");
   assert.equal(await state("0.141.0", true), "confinement_unverified");
+  assert.equal(await state("0.157.0", true), "unsupported");
+  assert.equal(await state("0.157.0", true, true), "confinement_unverified");
+  assert.equal(
+    await state("0.157.0", true, true, "--ignore-user-config"),
+    "unsupported",
+  );
   assert.deepEqual(
     codexEnvironment({
       Path: "path",
@@ -66,6 +81,26 @@ test("detects absent, unsupported, unauthenticated and recognized Codex", async 
     }),
     { PATH: "path", CODEX_HOME: "auth" },
   );
+});
+
+test("workspace profile retains the CLI restrictions and disables further integrations", () => {
+  const args = workspaceCodexExecArgs("fixture");
+  assert.equal(args.at(-1), "-");
+  assert.equal(args[args.indexOf("--sandbox") + 1], "read-only");
+  for (const value of [
+    "--ignore-user-config",
+    "--ignore-rules",
+    "--strict-config",
+    'approval_policy="never"',
+    'web_search="disabled"',
+    "mcp_servers={}",
+    "features.shell_tool=false",
+    "features.unified_exec=false",
+    "features.skip_host_skill_discovery=true",
+    'windows.sandbox="unelevated"',
+  ])
+    assert.ok(args.includes(value), value);
+  assert.ok(args.every((arg) => !arg.startsWith("--dangerously-")));
 });
 
 test("decodes fragmented UTF-8/CRLF, unknown events, usage and completion", () => {

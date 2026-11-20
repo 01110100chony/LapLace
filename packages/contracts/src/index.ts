@@ -221,6 +221,7 @@ export function isResponse<K extends Operation>(
   if (
     operation === "codex.status" ||
     operation === "codex.prepare" ||
+    operation === "codex.approval" ||
     operation === "codex.start" ||
     operation === "codex.events" ||
     operation === "codex.cancel"

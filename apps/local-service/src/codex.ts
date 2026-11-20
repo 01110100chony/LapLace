@@ -5,19 +5,22 @@ import { dirname, isAbsolute, join, relative } from "node:path";
 import {
   detectCodex,
   runCodex,
-  type CodexInstallation,
+  runWorkspaceCodex,
   type CodexRunEvent,
   type VerifiedCodexBoundary,
 } from "@laplace/agents";
+import { runMockCodex, type CodexMockScenario } from "@laplace/agents/mock";
 import {
   codexMaxPromptBytes,
   codexMaxSourceBytes,
   codexPageSize,
   codexProvider,
   isContextPath,
+  type CodexApproval,
   type CodexEvent,
   type CodexExecution,
   type CodexManifest,
+  type CodexMode,
   type CodexPage,
   type CodexPrepare,
   type CodexPreview,
@@ -37,6 +40,7 @@ type Material = {
   prompt: Buffer;
   files: Map<string, Buffer>;
   protectedRoots: string[];
+  projectName: string;
 };
 const grantMs = 5 * 60_000;
 
@@ -67,6 +71,7 @@ export function prepareCodex(
   store: Catalog,
   request: CodexPrepare,
   dataDir: string,
+  mode: CodexMode = "verified_isolated",
 ): Material {
   const { projectId, contextId, snapshotDigest, question, selection } = request;
   const snapshot = store.context.get(projectId, contextId);
@@ -150,11 +155,12 @@ export function prepareCodex(
   if (prompt.length > codexMaxPromptBytes) throw new GitError("context_limit");
   const manifest: CodexManifest = {
     schemaVersion: 1,
+    mode,
     projectId,
     contextId,
     snapshotDigest,
     capturedAt: snapshot.completedAt,
-    provider: codexProvider,
+    provider: mode === "mock_development" ? "mock" : codexProvider,
     profile: "read-only",
     question,
     sources,
@@ -173,6 +179,7 @@ export function prepareCodex(
     },
     prompt,
     files,
+    projectName: store.lookup(projectId).name,
     protectedRoots: [
       ...store.list().projects.map(({ root }) => root),
       snapshot.gitRoot,
@@ -207,6 +214,11 @@ type Run = {
   state: CodexState;
   events: CodexEvent[];
 };
+export type CodexDevelopment =
+  | { mode: "mock_development"; scenario: CodexMockScenario }
+  | { mode: "unconfined_workspace_development"; helper: string };
+type ApprovalRequest = Extract<CodexRequests, { operation: "codex.approval" }>;
+type StartRequest = Extract<CodexRequests, { operation: "codex.start" }>;
 
 export class CodexQueries {
   private grant: Material | undefined;
@@ -214,33 +226,51 @@ export class CodexQueries {
   private run: Run | undefined;
   private readonly boundary: VerifiedCodexBoundary | undefined;
   private readonly detect: typeof detectCodex;
+  private readonly development: CodexDevelopment | undefined;
+  readonly mode: CodexMode;
 
   constructor({
     boundary,
     detect = detectCodex,
-  }: { boundary?: VerifiedCodexBoundary; detect?: typeof detectCodex } = {}) {
+    development,
+  }: {
+    boundary?: VerifiedCodexBoundary;
+    detect?: typeof detectCodex;
+    development?: CodexDevelopment;
+  } = {}) {
     this.boundary = boundary;
     this.detect = detect;
+    this.development = development;
+    this.mode = development?.mode ?? "verified_isolated";
   }
 
   async status(projectId: string): Promise<CodexStatus> {
+    if (this.mode === "mock_development")
+      return { projectId, mode: this.mode, state: "mock_ready", version: null };
     const { availability } = await this.check();
-    return { projectId, ...availability };
+    return { projectId, mode: this.mode, ...availability };
   }
 
   private async check() {
     const cwd = await realpath(tmpdir());
-    const { availability, installation } = await this.detect(cwd);
+    const workspace = this.mode === "unconfined_workspace_development";
+    const { availability, installation } = await this.detect(cwd, {
+      workspace,
+    });
     return {
       installation,
       availability:
-        installation && (await this.boundary?.verify(installation))
-          ? { ...availability, state: "ready" as const }
-          : availability,
+        installation && workspace
+          ? { ...availability, state: "workspace_ready" as const }
+          : installation && (await this.boundary?.verify(installation))
+            ? { ...availability, state: "ready" as const }
+            : availability,
     };
   }
 
   prepare(material: Material) {
+    if (material.manifest.mode !== this.mode)
+      throw new GitError("codex_selection_invalid");
     this.clearGrant();
     this.grant = material;
     this.grantTimer = setTimeout(() => this.clearGrant(), grantMs);
@@ -253,13 +283,10 @@ export class CodexQueries {
     this.grant = undefined;
   }
 
-  async start(
-    request: Extract<CodexRequests, { operation: "codex.start" }>,
-  ): Promise<CodexExecution> {
+  private authorizedMaterial(request: ApprovalRequest | StartRequest) {
     const material = this.grant;
     const preview = material?.preview;
     if (
-      !request.confirmed ||
       !material ||
       !preview ||
       Date.now() >= Date.parse(preview.expiresAt) ||
@@ -269,12 +296,51 @@ export class CodexQueries {
       preview.manifestDigest !== request.manifestDigest
     )
       throw new GitError("codex_authorization_required");
+    return material;
+  }
+
+  approval(request: ApprovalRequest): CodexApproval {
+    const { preview, projectName } = this.authorizedMaterial(request);
+    const {
+      mode,
+      projectId,
+      contextId,
+      snapshotDigest,
+      grantId,
+      manifestDigest,
+      sourceBytes,
+      promptBytes,
+    } = preview;
+    return {
+      mode,
+      projectId,
+      contextId,
+      snapshotDigest,
+      grantId,
+      manifestDigest,
+      sourceBytes,
+      promptBytes,
+      projectName,
+      sources: preview.sources.map(({ path, bytes }) => ({ path, bytes })),
+    };
+  }
+
+  async start(request: StartRequest): Promise<CodexExecution> {
+    if (
+      !request.confirmed ||
+      (this.mode === "unconfined_workspace_development" &&
+        request.unconfinedConfirmed !== true)
+    )
+      throw new GitError("codex_authorization_required");
+    const material = this.authorizedMaterial(request);
     if (this.run?.state === "running") throw new GitError("codex_busy");
     this.clearGrant();
-    if (!this.boundary) throw new GitError("codex_unavailable");
+    const { boundary, development } = this;
+    if (!boundary && !development) throw new GitError("codex_unavailable");
 
     const previous = this.run;
-    const execution = {
+    const execution: CodexExecution = {
+      mode: this.mode,
       projectId: request.projectId,
       contextId: request.contextId,
       executionId: randomUUID(),
@@ -288,10 +354,46 @@ export class CodexQueries {
     };
     this.run = run;
     try {
+      if (development?.mode === "mock_development") {
+        void this.execute(run, (emit, signal) =>
+          runMockCodex(development.scenario, emit, signal),
+        );
+        return execution;
+      }
       const { installation, availability } = await this.check();
-      if (!installation || availability.state !== "ready")
-        throw new GitError("codex_unavailable");
-      void this.execute(run, installation, this.boundary, material);
+      if (!installation) throw new GitError("codex_unavailable");
+      if (
+        development?.mode === "unconfined_workspace_development" &&
+        availability.state === "workspace_ready"
+      ) {
+        void this.execute(run, (emit, signal) =>
+          this.withWorkspace(material, (cwd, workspace) =>
+            runWorkspaceCodex({
+              installation,
+              helper: development.helper,
+              cwd,
+              workspace,
+              prompt: material.prompt,
+              emit,
+              signal,
+            }),
+          ),
+        );
+      } else if (boundary && availability.state === "ready") {
+        void this.execute(run, (emit, signal) =>
+          this.withWorkspace(material, (cwd, workspace) =>
+            runCodex({
+              installation,
+              boundary,
+              cwd,
+              workspace,
+              prompt: material.prompt,
+              emit,
+              signal,
+            }),
+          ),
+        );
+      } else throw new GitError("codex_unavailable");
       return execution;
     } catch (error) {
       this.run = previous;
@@ -301,55 +403,53 @@ export class CodexQueries {
 
   private async execute(
     run: Run,
-    installation: CodexInstallation,
-    boundary: VerifiedCodexBoundary,
-    material: Material,
+    adapter: (
+      emit: (event: CodexRunEvent) => void,
+      signal: AbortSignal,
+    ) => Promise<Extract<CodexRunEvent, { type: "terminal" }>>,
   ) {
     let terminal: Extract<CodexRunEvent, { type: "terminal" }> = {
       type: "terminal",
       state: "failed",
       failure: "workspace_failed",
     };
-    let root: string | undefined;
-    const emit = (event: CodexRunEvent) =>
-      run.events.push({ ...event, seq: run.events.length + 1 });
+    const signal = run.controller.signal;
     try {
-      if (run.controller.signal.aborted) {
-        terminal = { type: "terminal", state: "cancelled", failure: null };
-        return;
-      }
-      const temp = await realpath(tmpdir());
-      for (const protectedRoot of material.protectedRoots) {
-        const path = relative(protectedRoot, temp);
-        if (
-          path === "" ||
-          (!isAbsolute(path) && path.split(/[\\/]/)[0] !== "..")
-        )
-          throw new Error("Temporary directory belongs to a protected root");
-      }
-      root = await mkdtemp(join(temp, "laplace-codex-"));
-      const cwd = await materialize(root, material);
-      terminal = await runCodex({
-        installation,
-        boundary,
-        cwd,
-        workspace: root,
-        prompt: material.prompt,
-        emit,
-        signal: run.controller.signal,
-      });
+      if (!signal.aborted)
+        terminal = await adapter((event) => {
+          if (run.state === "running" && !signal.aborted)
+            run.events.push({ ...event, seq: run.events.length + 1 });
+        }, signal);
     } catch {
       // Process and filesystem details may contain source paths or credentials.
     } finally {
-      if (root) {
-        await rm(root, { recursive: true, force: true, maxRetries: 2 }).catch(
-          () => {
-            console.error("[laplace:codex] workspace_cleanup_failed");
-          },
-        );
-      }
+      if (signal.aborted)
+        terminal = { type: "terminal", state: "cancelled", failure: null };
       run.state = terminal.state;
-      emit(terminal);
+      run.events.push({ ...terminal, seq: run.events.length + 1 });
+    }
+  }
+
+  private async withWorkspace<T>(
+    material: Material,
+    launch: (cwd: string, workspace: string) => Promise<T>,
+  ) {
+    const temp = await realpath(tmpdir());
+    for (const protectedRoot of material.protectedRoots) {
+      const path = relative(protectedRoot, temp);
+      if (path === "" || (!isAbsolute(path) && path.split(/[\\/]/)[0] !== ".."))
+        throw new Error("Temporary directory belongs to a protected root");
+    }
+    const root = await mkdtemp(join(temp, "laplace-codex-"));
+    try {
+      const cwd = await materialize(root, material);
+      return await launch(cwd, root);
+    } finally {
+      await rm(root, { recursive: true, force: true, maxRetries: 2 }).catch(
+        () => {
+          console.error("[laplace:codex] workspace_cleanup_failed");
+        },
+      );
     }
   }
 

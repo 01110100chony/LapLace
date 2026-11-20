@@ -289,7 +289,7 @@ export function ContextView({
         onOfferExcerpt={(excerpt) => open(excerpt.contextId, excerpt)}
       />
       <CodexQueryView
-        key={snapshot?.contextId ?? projectId}
+        key={`${projectId}/${snapshot?.contextId ?? ""}`}
         projectId={projectId}
         projectName={projectName}
         client={codex}

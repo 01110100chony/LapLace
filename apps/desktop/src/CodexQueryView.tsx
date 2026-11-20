@@ -6,13 +6,14 @@ import {
   isCodexQuestion,
   type CodexEvent,
   type CodexExecution,
+  type CodexMode,
   type CodexPreview,
   type CodexSelection,
   type CodexStatus,
   type ContextSnapshot,
   type ContextSourcePreview,
 } from "@laplace/contracts";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DesktopError, errorMessage, type createDesktopClient } from "./ipc";
 import { createLatestRequest } from "./workspace";
 
@@ -26,6 +27,13 @@ const availability: Record<CodexStatus["state"], string> = {
   confinement_unverified:
     "Envio bloqueado. O confinamento de leitura do Codex ainda precisa ser comprovado neste ambiente.",
   ready: "Confinamento verificado. Codex disponível para consulta.",
+  mock_ready: "Simulação local com dados fictícios.",
+  workspace_ready: "Codex disponível. Isolamento de leitura não verificado.",
+};
+const modeLabel: Record<CodexMode, string> = {
+  verified_isolated: "Modo isolado",
+  mock_development: "Mock de desenvolvimento",
+  unconfined_workspace_development: "Codex real em Workspace Dev",
 };
 const stateLabel = {
   running: "Consulta em andamento",
@@ -37,25 +45,44 @@ const stateLabel = {
 };
 const failures = {
   launch_failed: "Falha ao iniciar o processo.",
+  authentication_failed: "A autenticação da consulta falhou.",
   provider_failed: "O CLI ou o provedor reportou uma falha.",
   protocol_error: "O fluxo JSONL terminou sem indicar uma resposta completa.",
   output_limit: "O fluxo excedeu o limite de saída.",
   workspace_failed: "Falha ao preparar a área temporária.",
 };
 
-function ExecutionProgress({ events }: { events: CodexEvent[] }) {
+function ExecutionProgress({
+  events,
+  mode,
+  trackingInterrupted,
+}: {
+  events: CodexEvent[];
+  mode: CodexMode;
+  trackingInterrupted: boolean;
+}) {
+  const simulated = mode === "mock_development";
   const terminal = events.find((item) => item.type === "terminal");
   const session = events.find((item) => item.type === "session");
   const notices = events.filter((item) => item.type === "notice").length;
   return (
     <section className="context-result" aria-labelledby="codex-response">
-      <h4 id="codex-response">Resposta gerada pelo Codex</h4>
+      <h4 id="codex-response">
+        {simulated ? "Resposta simulada" : "Resposta do Codex"}
+      </h4>
+      <p className="context-muted">
+        {modeLabel[mode]}
+        {mode === "unconfined_workspace_development" &&
+          " · Isolamento de leitura não verificado"}
+      </p>
       <p role="status">
         {terminal
           ? stateLabel[terminal.state]
-          : events.some((event) => event.type === "progress")
-            ? "Processando a pergunta…"
-            : "Iniciando consulta…"}
+          : trackingInterrupted
+            ? "Acompanhamento da consulta interrompido"
+            : events.some((event) => event.type === "progress")
+              ? "Processando a pergunta…"
+              : "Consulta autorizada. Iniciando…"}
       </p>
       {terminal?.failure && (
         <p className="service-error">{failures[terminal.failure]}</p>
@@ -67,15 +94,18 @@ function ExecutionProgress({ events }: { events: CodexEvent[] }) {
             {text}
           </pre>
         ))}
-      <p className="context-muted">
-        As afirmações e referências no texto são do modelo. O Laplace verifica a
-        origem das fontes na prévia.
-      </p>
+      {!simulated && (
+        <p className="context-muted">
+          As afirmações e referências no texto são do modelo. O Laplace verifica
+          a origem das fontes na prévia.
+        </p>
+      )}
       <details>
         <summary>Dados da execução</summary>
         {session && (
           <p>
-            Sessão do provedor <code>{session.sessionId}</code>
+            {simulated ? "Sessão simulada" : "Sessão do provedor"}{" "}
+            <code>{session.sessionId}</code>
           </p>
         )}
         {notices > 0 && <p>Eventos ignorados pelo adaptador: {notices}</p>}
@@ -106,12 +136,14 @@ export function CodexQueryView({
   excerpts: ContextSourcePreview[];
 }) {
   const [status, setStatus] = useState<CodexStatus>();
-  const [checking, setChecking] = useState(false);
+  const [checking, setChecking] = useState(true);
   const [selection, setSelection] = useState<CodexSelection[]>([]);
   const [question, setQuestion] = useState("");
   const [preview, setPreview] = useState<CodexPreview>();
   const [execution, setExecution] = useState<CodexExecution>();
+  const [usedGrant, setUsedGrant] = useState<string>();
   const [events, setEvents] = useState<CodexEvent[]>([]);
+  const [trackingInterrupted, setTrackingInterrupted] = useState(false);
   const [running, setRunning] = useState(false);
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -124,6 +156,10 @@ export function CodexQueryView({
   const heading = useRef<HTMLHeadingElement>(null);
   const mounted = useRef(false);
   const run = useRef<CodexExecution | null>(null);
+  const ready =
+    status?.state === "ready" ||
+    status?.state === "mock_ready" ||
+    status?.state === "workspace_ready";
 
   useEffect(() => {
     mounted.current = true;
@@ -155,6 +191,8 @@ export function CodexQueryView({
       } catch (error) {
         if (disposed) return;
         void client.cancel(current).catch(() => {});
+        run.current = null;
+        setTrackingInterrupted(true);
         setRunning(false);
         setCancelling(false);
         setProblem(errorMessage(error));
@@ -167,9 +205,7 @@ export function CodexQueryView({
     };
   }, [client, execution]);
 
-  function check() {
-    setChecking(true);
-    setProblem("");
+  const fetchStatus = useCallback(() => {
     void requests.status.run(
       () => client.status(projectId),
       (data) => {
@@ -177,10 +213,21 @@ export function CodexQueryView({
         setChecking(false);
       },
       (error) => {
+        setStatus(undefined);
         setChecking(false);
         setProblem(errorMessage(error));
       },
     );
+  }, [client, projectId, requests]);
+
+  useEffect(() => {
+    fetchStatus();
+  }, [fetchStatus]);
+
+  function check() {
+    setChecking(true);
+    setProblem("");
+    fetchStatus();
   }
 
   function select(source: CodexSelection) {
@@ -219,7 +266,16 @@ export function CodexQueryView({
   }
 
   function start() {
-    if (!preview || busy || running || status?.state !== "ready") return;
+    if (
+      !preview ||
+      busy ||
+      running ||
+      checking ||
+      !ready ||
+      status?.mode !== preview.mode ||
+      usedGrant === preview.grantId
+    )
+      return;
     setBusy(true);
     setProblem("");
     void requests.start.run(
@@ -230,8 +286,10 @@ export function CodexQueryView({
       },
       (data) => {
         run.current = data;
+        setUsedGrant(preview.grantId);
         setExecution(data);
         setEvents([]);
+        setTrackingInterrupted(false);
         setBusy(false);
         setRunning(true);
       },
@@ -287,21 +345,35 @@ export function CodexQueryView({
           onClick={check}
           disabled={checking || busy || running}
         >
-          Verificar Codex CLI
+          Verificar disponibilidade
         </button>
       </div>
       <p role="status" className="context-muted">
         {checking
-          ? "Verificando o Codex CLI…"
+          ? "Verificando disponibilidade…"
           : status
             ? [
+                modeLabel[status.mode],
                 status.version && `Codex CLI ${status.version}`,
                 availability[status.state],
+                !ready &&
+                  status.state !== "confinement_unverified" &&
+                  "Execução bloqueada",
+                !ready &&
+                  status.mode === "verified_isolated" &&
+                  status.state !== "confinement_unverified" &&
+                  "Isolamento indisponível",
               ]
                 .filter(Boolean)
                 .join(" · ")
-            : "Verifique a disponibilidade do Codex CLI antes de enviar."}
+            : "Verifique a disponibilidade antes de consultar."}
       </p>
+      {status?.mode === "unconfined_workspace_development" && (
+        <p className="service-error">
+          Isolamento de leitura não verificado. Use somente dados fictícios ou
+          não sensíveis.
+        </p>
+      )}
       {!eligible ? (
         <p>Abra uma captura com fontes preservadas no histórico.</p>
       ) : (
@@ -368,12 +440,18 @@ export function CodexQueryView({
       {preview && (
         <section className="context-result" aria-labelledby="codex-preview">
           <h4 id="codex-preview" ref={heading} tabIndex={-1}>
-            Prévia do envio
+            Prévia da consulta
           </h4>
           <p>
-            Destino <strong>OpenAI Codex</strong> · Projeto{" "}
-            <strong>{projectName}</strong>
+            Destino{" "}
+            <strong>
+              {preview.mode === "mock_development"
+                ? "Mock local"
+                : "OpenAI Codex"}
+            </strong>{" "}
+            · Projeto <strong>{projectName}</strong>
           </p>
+          <p>{modeLabel[preview.mode]}</p>
           <p>
             Captura <code>{preview.contextId}</code> ·{" "}
             <time dateTime={preview.capturedAt}>
@@ -385,8 +463,14 @@ export function CodexQueryView({
           </p>
           <p>
             {preview.sourceBytes} bytes de fontes · {preview.promptBytes} bytes
-            de entrada · sessão efêmera · somente leitura · sem escalonamento ·
-            até {codexTimeoutMs / 1000} s
+            de entrada
+            {preview.mode !== "mock_development" && (
+              <>
+                {" "}
+                · sessão efêmera · somente leitura · sem escalonamento · até{" "}
+                {codexTimeoutMs / 1000} s
+              </>
+            )}
           </p>
           <p>
             Pergunta <strong>{preview.question}</strong>
@@ -436,14 +520,18 @@ export function CodexQueryView({
             <button
               className="button primary"
               disabled={
-                status?.state !== "ready" ||
+                !ready ||
+                status?.mode !== preview.mode ||
+                checking ||
                 busy ||
                 running ||
-                execution?.manifestDigest === preview.manifestDigest
+                usedGrant === preview.grantId
               }
               onClick={start}
             >
-              Autorizar e consultar
+              {preview.mode === "mock_development"
+                ? "Executar simulação"
+                : "Autorizar e consultar"}
             </button>
             {running && (
               <button className="button" disabled={cancelling} onClick={cancel}>
@@ -458,7 +546,13 @@ export function CodexQueryView({
           {problem}
         </p>
       )}
-      {execution && <ExecutionProgress events={events} />}
+      {execution && (
+        <ExecutionProgress
+          events={events}
+          mode={execution.mode}
+          trackingInterrupted={trackingInterrupted}
+        />
+      )}
     </section>
   );
 }

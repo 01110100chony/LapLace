@@ -2,7 +2,7 @@
 
 mod ipc;
 
-use ipc::{CodexRequest, ErrorCode, Fault, Operation, Response, SearchScope, Sidecar};
+use ipc::{CodexMode, CodexRequest, ErrorCode, Fault, Operation, Response, SearchScope, Sidecar};
 use tauri::{path::BaseDirectory, Manager, RunEvent, State, WebviewWindow};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
@@ -303,24 +303,76 @@ async fn codex_request(
     window: WebviewWindow,
     sidecar: State<'_, Sidecar>,
 ) -> Result<Response, Fault> {
-    if let CodexRequest::Start { confirmed, .. } = &mut request {
-        let (sender, receiver) = tokio::sync::oneshot::channel();
-        window
-            .dialog()
-            .message("Autoriza o envio da pergunta e das fontes da prévia para OpenAI Codex?")
-            .title("Autorizar consulta ao Codex")
-            .parent(&window)
-            .buttons(MessageDialogButtons::OkCancelCustom(
-                "Autorizar envio".into(),
-                "Cancelar".into(),
-            ))
-            .show(move |accepted| {
-                let _ = sender.send(accepted);
-            });
-        if !receiver.await.unwrap_or(false) {
-            return Err(ErrorCode::CodexAuthorizationRequired.into());
+    if let CodexRequest::Start {
+        project_id,
+        context_id,
+        grant_id,
+        manifest_digest,
+        confirmed,
+        unconfined_confirmed,
+    } = &mut request
+    {
+        let approval_request = CodexRequest::Approval {
+            project_id: project_id.clone(),
+            context_id: context_id.clone(),
+            grant_id: grant_id.clone(),
+            manifest_digest: manifest_digest.clone(),
+        };
+        let approval = sidecar
+            .request(id.clone(), Operation::Codex(&approval_request))
+            .await?
+            .codex_approval()?;
+        if approval.grant_id != *grant_id || approval.manifest_digest != *manifest_digest {
+            return Err(ErrorCode::InvalidResponse.into());
+        }
+        let dialog = match approval.mode {
+            CodexMode::VerifiedIsolated => Some((
+                "Autorizar consulta ao Codex",
+                "Autoriza o envio da pergunta e das fontes da prévia para OpenAI Codex?".into(),
+                "Autorizar envio",
+            )),
+            CodexMode::MockDevelopment => None,
+            CodexMode::UnconfinedWorkspaceDevelopment => {
+                let sources = approval
+                    .sources
+                    .iter()
+                    .map(|source| format!("• {} ({} bytes)", source.path, source.bytes))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                Some((
+                    "Modo de desenvolvimento — acesso de leitura não isolado",
+                    format!(
+                        "O Codex será executado em modo somente leitura, mas essa configuração não garante que ele só consiga acessar os arquivos selecionados. Não utilize projetos confidenciais, credenciais ou dados sensíveis neste modo.\n\n\
+                        Projeto {}\nCaptura {}\nSHA-256 {}\n\n\
+                        Destino OpenAI Codex\nModo Workspace Dev\nIsolamento de leitura não verificado\n\n\
+                        Arquivos selecionados\n{}\n\n{} bytes de fontes · {} bytes de entrada",
+                        approval.project_name, context_id, approval.snapshot_digest,
+                        sources, approval.source_bytes, approval.prompt_bytes,
+                    ),
+                    "Autorizar esta consulta",
+                ))
+            }
+        };
+        if let Some((title, message, button)) = dialog {
+            let (sender, receiver) = tokio::sync::oneshot::channel();
+            window
+                .dialog()
+                .message(message)
+                .title(title)
+                .parent(&window)
+                .buttons(MessageDialogButtons::OkCancelCustom(
+                    button.into(),
+                    "Cancelar".into(),
+                ))
+                .show(move |accepted| {
+                    let _ = sender.send(accepted);
+                });
+            if !receiver.await.unwrap_or(false) {
+                return Err(ErrorCode::CodexAuthorizationRequired.into());
+            }
         }
         *confirmed = true;
+        *unconfined_confirmed = matches!(approval.mode, CodexMode::UnconfinedWorkspaceDevelopment);
     }
     sidecar
         .request(id, Operation::Codex(&request))

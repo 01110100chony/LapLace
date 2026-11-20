@@ -1,5 +1,6 @@
 import {
   execFile,
+  spawn,
   type ChildProcessWithoutNullStreams,
 } from "node:child_process";
 import { realpathSync, statSync } from "node:fs";
@@ -14,10 +15,17 @@ import {
   type CodexEvent,
   type CodexFailure,
   type CodexState,
-  type CodexStatus,
 } from "@laplace/contracts";
 
-type Availability = Omit<CodexStatus, "projectId">;
+type Availability = {
+  state:
+    | "missing"
+    | "unsupported"
+    | "probe_failed"
+    | "unauthenticated"
+    | "confinement_unverified";
+  version: string | null;
+};
 export type CodexInstallation = { executable: string; version: string };
 type EventBody<T = CodexEvent> = T extends CodexEvent ? Omit<T, "seq"> : never;
 export type CodexRunEvent = EventBody;
@@ -116,6 +124,7 @@ const probe: Probe = (file, args, cwd, env) =>
   });
 
 const supportedVersion = "0.141.0";
+const workspaceVersion = "0.157.0";
 const execOptions = [
   "--json",
   "--sandbox",
@@ -136,10 +145,12 @@ export async function detectCodex(
     find = findCodex,
     call = probe,
     env = codexEnvironment(),
+    workspace = false,
   }: {
     find?: () => string | undefined;
     call?: Probe;
     env?: NodeJS.ProcessEnv;
+    workspace?: boolean;
   } = {},
 ): Promise<{
   availability: Availability;
@@ -158,7 +169,7 @@ export async function detectCodex(
   if (result.code !== 0 || help.code !== 0 || !version)
     return { availability: { state: "probe_failed", version } };
   if (
-    version !== supportedVersion ||
+    version !== (workspace ? workspaceVersion : supportedVersion) ||
     !execOptions.every((flag) => help.stdout.includes(flag)) ||
     !help.stdout.includes("read-only") ||
     !help.stdout.includes("stdin")
@@ -186,16 +197,18 @@ export async function detectCodex(
 
 // A host-owned boundary must constrain all model tools and own the child tree,
 // including forced termination when the parent sidecar disappears.
+type CodexLaunch = {
+  child: ChildProcessWithoutNullStreams;
+  stop: () => void;
+};
+
 export interface VerifiedCodexBoundary {
   verify(installation: CodexInstallation): Promise<boolean>;
   start(
     file: string,
     args: string[],
     options: { cwd: string; env: NodeJS.ProcessEnv; workspace: string },
-  ): {
-    child: ChildProcessWithoutNullStreams;
-    stop: () => void;
-  };
+  ): CodexLaunch;
 }
 
 export function codexExecArgs(cwd: string) {
@@ -253,6 +266,31 @@ export function codexExecArgs(cwd: string) {
     'shell_environment_policy.inherit="none"',
     "-",
   ];
+}
+
+export function workspaceCodexExecArgs(cwd: string) {
+  const args = codexExecArgs(cwd);
+  args.splice(
+    args.length - 1,
+    0,
+    "-c",
+    'windows.sandbox="unelevated"',
+    "-c",
+    'history.persistence="none"',
+    "-c",
+    "features.skip_host_skill_discovery=true",
+    "-c",
+    "features.unified_exec=false",
+    "-c",
+    "features.code_mode=false",
+    "-c",
+    "features.connectors=false",
+    "-c",
+    "features.tool_search=false",
+    "-c",
+    "features.apply_patch_freeform=false",
+  );
+  return args;
 }
 
 export class CodexJsonl {
@@ -379,6 +417,13 @@ export class CodexJsonl {
         break;
       }
       case "error":
+        if (
+          typeof event.message === "string" &&
+          /\b401 Unauthorized\b/i.test(event.message)
+        ) {
+          this.failure = "authentication_failed";
+          break;
+        }
         this.providerError = true;
         this.publish({ type: "notice", reason: "provider_error" });
         break;
@@ -391,38 +436,64 @@ export class CodexJsonl {
   }
 }
 
-export async function runCodex({
-  installation,
-  boundary,
-  cwd,
-  workspace,
-  prompt,
-  emit,
-  signal,
-  timeout = codexTimeoutMs,
-}: {
+type CodexRunInput = {
   installation: CodexInstallation;
-  boundary: VerifiedCodexBoundary;
   cwd: string;
   workspace: string;
   prompt: Buffer;
   emit: (event: CodexRunEvent) => void;
   signal: AbortSignal;
   timeout?: number;
-}): Promise<Terminal> {
+};
+
+export function runCodex(
+  input: CodexRunInput & { boundary: VerifiedCodexBoundary },
+) {
+  const { boundary, installation, cwd, workspace } = input;
+  return superviseCodex(input, () =>
+    boundary.start(installation.executable, codexExecArgs(cwd), {
+      cwd,
+      workspace,
+      env: codexEnvironment(),
+    }),
+  );
+}
+
+export function runWorkspaceCodex(input: CodexRunInput & { helper: string }) {
+  const { helper, installation, cwd } = input;
+  return superviseCodex(input, () => {
+    const child = spawn(
+      helper,
+      [
+        "--laplace-codex-job",
+        String(process.pid),
+        installation.executable,
+        ...workspaceCodexExecArgs(cwd),
+      ],
+      { cwd, env: codexEnvironment(), windowsHide: true },
+    );
+    return {
+      child,
+      stop: () => {
+        child.kill();
+      },
+    };
+  });
+}
+
+async function superviseCodex(
+  { prompt, emit, signal, timeout = codexTimeoutMs }: CodexRunInput,
+  launch: () => CodexLaunch,
+): Promise<Terminal> {
   const terminal = (
     state: Exclude<CodexState, "running">,
     failure: CodexFailure | null = null,
   ): Terminal => ({ type: "terminal", state, failure });
   if (signal.aborted) return terminal("cancelled");
   const parser = new CodexJsonl(emit);
-  let process: ReturnType<VerifiedCodexBoundary["start"]>;
+  let process: CodexLaunch;
   try {
-    process = boundary.start(installation.executable, codexExecArgs(cwd), {
-      cwd,
-      workspace,
-      env: codexEnvironment(),
-    });
+    process = launch();
   } catch {
     return terminal("failed", "launch_failed");
   }
@@ -438,7 +509,9 @@ export async function runCodex({
     const abort = () => cancel(terminal("cancelled"));
     const timer = setTimeout(() => cancel(terminal("timeout")), timeout);
     signal.addEventListener("abort", abort, { once: true });
-    child.once("spawn", () => emit({ type: "started" }));
+    child.once("spawn", () => {
+      if (!stopping) emit({ type: "started" });
+    });
     child.stdin.on("error", () => {
       // Closing stdin early is common when the CLI fails. Exit and JSONL determine the outcome.
     });

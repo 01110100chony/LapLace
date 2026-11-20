@@ -19,7 +19,7 @@ function Assert-Smoke($Condition, [string] $Message) {
     if (!$Condition) { throw $Message }
 }
 
-function Invoke-Sidecar([hashtable[]] $Requests, [string] $SearchPath = $systemPath) {
+function Invoke-Sidecar([hashtable[]] $Requests, [string] $SearchPath = $systemPath, [switch] $ForceWorkspaceDev) {
     $start = [System.Diagnostics.ProcessStartInfo]::new()
     $start.FileName = $sidecar
     $start.Arguments = '--preserve-symlinks-main "{0}" "{1}"' -f $service, $data
@@ -30,6 +30,10 @@ function Invoke-Sidecar([hashtable[]] $Requests, [string] $SearchPath = $systemP
     $start.RedirectStandardError = $true
     $start.StandardOutputEncoding = [System.Text.UTF8Encoding]::new($false)
     $start.EnvironmentVariables['Path'] = $SearchPath
+    if ($ForceWorkspaceDev) {
+        $start.EnvironmentVariables['LAPLACE_CODEX_DEV'] = 'workspace'
+        $start.Arguments += ' --codex-workspace "{0}"' -f (Join-Path $app 'laplace.exe')
+    }
     foreach ($name in 'NODE_OPTIONS', 'NODE_PATH', 'NODE_V8_COVERAGE') {
         $start.EnvironmentVariables.Remove($name)
     }
@@ -71,6 +75,7 @@ try {
     foreach ($file in 'laplace.exe', 'laplace-node.exe', 'sidecar/service.cjs', 'licenses/NODE-LICENSE.txt', 'licenses/THIRD-PARTY-NOTICES.txt', 'uninstall.exe') {
         Assert-Smoke (Test-Path -LiteralPath (Join-Path $app $file) -PathType Leaf) "Missing installed file $file."
     }
+    Assert-Smoke (!(Test-Path -LiteralPath (Join-Path $app 'laplace-codex-job.exe'))) 'Development launcher was packaged.'
 
     $repo = New-Item -ItemType Directory -Path (Join-Path $catalog 'Repo with spaces')
     $health, $empty, $missing = Invoke-Sidecar @(
@@ -135,6 +140,8 @@ try {
     Assert-Smoke ($codex.ok -and $codex.data.provider -eq 'openai' -and
         $codex.data.snapshotDigest -eq $capture.data.digest -and
         $codex.data.sources[0].sentSha256 -eq $fileHash) 'Installed sidecar failed to prepare the preserved Codex selection.'
+    $mode = Invoke-Sidecar @(@{ operation = 'codex.status'; projectId = $id }) -ForceWorkspaceDev
+    Assert-Smoke ($mode.ok -and $mode.data.mode -eq 'verified_isolated') 'Installed sidecar accepted development configuration.'
 
     $db = Join-Path $data 'catalog.sqlite3'
     Assert-Smoke (Test-Path -LiteralPath $db -PathType Leaf) 'SQLite catalog was not created.'

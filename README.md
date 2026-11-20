@@ -209,19 +209,54 @@ O resumo observa branch, HEAD e contagens no momento da consulta. Alterações e
 
 ## Consultar com Codex (C03)
 
-Em **Contexto**, abra uma captura preservada e selecione arquivos em **Consultar com Codex**. Para escolher um trecho, abra a prévia de um resultado da busca e clique em **Disponibilizar trecho para consulta**. Marque o trecho no painel, escreva a pergunta e clique em **Preparar prévia**. A prévia mostra o destino OpenAI Codex, a captura, os caminhos, os digests, os intervalos e as omissões. A autorização fica vinculada à pergunta, à seleção e ao digest mostrado e exige confirmação em diálogo nativo.
+Em **Contexto**, abra uma captura preservada e selecione arquivos em **Consultar com Codex**. Para escolher um trecho, abra a prévia de um resultado da busca e clique em **Disponibilizar trecho para consulta**. Marque o trecho no painel, escreva a pergunta e clique em **Preparar prévia**. A prévia mostra o modo, o destino, a captura, os caminhos, os digests, os intervalos e as omissões. A autorização fica vinculada à pergunta, à seleção, ao modo e ao digest mostrado. As consultas reais exigem confirmação em diálogo nativo a cada envio.
 
-**Estado de entrega.** O envio pelo desktop depende de uma fronteira de leitura validada. A instalação testada do Codex CLI 0.141.0 reportou autenticação via ChatGPT, mas a sonda do sandbox Windows ficou sem comprovação de negação de leitura do canário. O aplicativo bloqueia o envio nessa condição. A captura, a pesquisa e a prévia continuam disponíveis. A consulta remota autenticada e o critério de confinamento permanecem pendentes.
+### Modos de consulta e desenvolvimento
+
+Enquanto o Windows Sandbox do host estiver indisponível, o C03.1 permite exercitar o fluxo de consulta e avançar com o C04 em ambiente de desenvolvimento.
+
+| Modo                               | Execução e garantias                                                                                                                                                                                                                                                                                 |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `verified_isolated`                | Padrão no desenvolvimento e na distribuição. Exige uma fronteira de leitura verificada e bloqueia a consulta enquanto ela estiver indisponível. Captura, pesquisa e prévia seguem disponíveis.                                                                                                       |
+| `mock_development`                 | Modo local recomendado para desenvolvimento. Usa dados fictícios e os eventos do C03, dispensa CLI, rede e sandbox, e marca a resposta e a sessão como simuladas.                                                                                                                                    |
+| `unconfined_workspace_development` | Consulta real ao OpenAI Codex com consentimento por execução. Usa uma área temporária com as fontes autorizadas e o sandbox nativo da CLI em modo somente leitura, sem escalonamento. O processo pode ter acesso de leitura a outros arquivos do host. Use somente dados fictícios ou não sensíveis. |
+
+Para habilitar o Mock, no PowerShell usado para iniciar o aplicativo, com o toolchain já configurado conforme a seção de desenvolvimento local, execute:
+
+```powershell
+$env:LAPLACE_CODEX_DEV = 'mock'
+pnpm dev --target x86_64-pc-windows-gnu
+```
+
+O cenário padrão é `fragmented`. Antes de iniciar, escolha outro com `$env:LAPLACE_CODEX_MOCK_SCENARIO` se quiser exercitar `completed`, `cancel`, `timeout`, `malformed_jsonl`, `authentication_error`, `interrupted`, `preparation_failure` ou `late_after_cancel`. Nos dois cenários de cancelamento, inicie a consulta e clique em **Cancelar consulta**. O C04 pode usar o cliente IPC existente com esse modo e importar `runMockCodex` de `@laplace/agents/mock` em testes. O adaptador usa os formatos de sessão, mensagem e estado terminal do C03 sem acessar um provedor.
+
+Para habilitar o Workspace Dev, use uma instalação autenticada da CLI **0.157.0**. Se houver mais de uma CLI, coloque a pasta do `codex.exe` compatível no início do `PATH` da sessão de desenvolvimento. Abra um repositório descartável com dados fictícios. Revise a captura, os arquivos, o volume e o destino no diálogo antes de autorizar cada envio.
+
+```powershell
+$env:LAPLACE_CODEX_DEV = 'workspace'
+pnpm dev --target x86_64-pc-windows-gnu
+```
+
+Para desativar, encerre o aplicativo, limpe a configuração da sessão e reinicie.
+
+```powershell
+Remove-Item Env:LAPLACE_CODEX_DEV, Env:LAPLACE_CODEX_MOCK_SCENARIO -ErrorAction SilentlyContinue
+pnpm dev --target x86_64-pc-windows-gnu
+```
+
+O host lê a configuração de desenvolvimento na inicialização do sidecar. Um build de distribuição ignora as variáveis e o sidecar empacotado ignora os argumentos de desenvolvimento. Nenhuma preferência é gravada no catálogo.
 
 ### Contratos e limites
 
-- `codex.status` detecta o executável, valida a versão e os parâmetros pelo help, e consulta `login status`. O adaptador reconhece a série testada com correspondência exata a **0.141.0**. O destino deste perfil é o provedor OpenAI integrado à CLI. O Laplace delega a autenticação à CLI.
+- `codex.status` detecta o executável, valida a versão e os parâmetros pelo help e consulta `login status`. O perfil estrito mantém a versão **0.141.0**. O Workspace Dev usa o perfil **0.157.0** com controles adicionais de ferramentas. A CLI lê sua própria autenticação e o Laplace não copia credenciais para a área temporária.
 - `codex.prepare` resolve o projeto e a captura pelo catálogo, confere o digest do manifesto C01 e verifica o SHA-256 dos blobs. Seleções C02 usam as coordenadas de bytes registradas no índice e os bytes preservados no C01. A prévia inclui um SHA-256 por trecho, o digest da entrada UTF-8 e um token de autorização efêmero. A autorização expira em cinco minutos ou ao preparar outra prévia.
-- `codex.start` consome uma autorização vinculada ao projeto, à captura e ao digest da seleção. Quando houver uma fronteira comprovada, o sidecar cria uma área descartável com o manifesto local e as fontes selecionadas em seus caminhos relativos. A CLI é iniciada num diretório vazio separado das fontes e recebe pergunta e conteúdo por stdin. O manifesto local registra os caminhos omitidos e os bytes fora dos trechos. Esses metadados de omissão ficam no Laplace.
+- `codex.start` consome uma autorização vinculada ao projeto, à captura, ao modo e ao digest da seleção. Para consultas reais, o sidecar cria uma área descartável com o manifesto local e as fontes selecionadas em seus caminhos relativos. A CLI inicia num diretório vazio separado das fontes e recebe pergunta e conteúdo por stdin. O manifesto local registra os caminhos omitidos e os bytes fora dos trechos. Esses metadados de omissão ficam no Laplace.
 - `codex.events` pagina até quatro eventos por sequência. `codex.cancel` solicita o encerramento da tentativa ativa. O adaptador mantém uma tentativa em memória, com até oito fontes, um arquivo inteiro ou um trecho por caminho, 64 KiB de fontes, 128 KiB de entrada, 24 KiB por linha JSONL, 512 KiB de saída por fluxo e 120 s por consulta. Uma seleção acima do limite é recusada. O limite de 192 KiB do IPC e o esquema SQLite v4 seguem em uso.
 - As respostas do modelo são exibidas como texto do provedor. As referências verificadas pelo Laplace identificam os bytes escolhidos no manifesto da consulta. O adaptador entrega estados terminais de conclusão, falha, interrupção, timeout ou cancelamento e mantém erros de diagnóstico sem a saída bruta do CLI. Gravação de conversas e validação de citações ficam para C04.
 
-O perfil usa `exec --json --sandbox read-only --ephemeral --ignore-user-config --ignore-rules` com `approval_policy="never"`, sessões novas e ferramentas de shell, navegação e integrações de usuário desativadas na configuração. O código separado em `packages/agents` define a fronteira esperada para supervisão nativa, inclusive o controle da árvore de processos na perda do sidecar. O aplicativo instalado ainda não registra um executor nessa fronteira. O [modo não interativo oficial](https://developers.openai.com/codex/noninteractive/) e o [sandbox Windows](https://developers.openai.com/codex/windows/) descrevem as capacidades da CLI.
+O perfil usa `exec --json --sandbox read-only --ephemeral --ignore-user-config --ignore-rules` com `approval_policy="never"`, sessões novas e ferramentas de shell, navegação e integrações de usuário desativadas na configuração. Ao iniciar o Workspace Dev, o build de desenvolvimento compila um auxiliar Windows que coloca a CLI em um Job Object com limite de memória de 768 MiB para a árvore de processos e encerramento no cancelamento, no timeout ou na perda do sidecar. A fronteira `VerifiedCodexBoundary` continua sendo o requisito do modo estrito. Consulte o [modo não interativo oficial](https://developers.openai.com/codex/noninteractive/) e o [sandbox Windows](https://developers.openai.com/codex/windows/).
+
+Para fechar o C03, falta integrar uma fronteira host que comprove a negação de leitura fora do conjunto autorizado, validar o canário com controles positivos e negativos e repetir a consulta autenticada dentro dessa fronteira. O resultado do Workspace Dev tem o modo registrado nos eventos paginados e o isolamento de leitura continua sem comprovação.
 
 ### Verificação separada do confinamento
 

@@ -7,6 +7,7 @@
     "dev:web": "vite",
     "build:web": "vite build",
     "prepare:sidecar": "node scripts/prepare-sidecar.mjs",
+    "prepare:sidecar:dev": "node scripts/prepare-sidecar.mjs --development",
     "typecheck": "tsc -p tsconfig.json",
     "test": "node --test test/*.test.ts"
   },

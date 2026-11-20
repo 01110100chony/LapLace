@@ -182,6 +182,8 @@ enum Payload {
     CodexStatus(ContextPayload),
     #[serde(rename = "codex.prepare")]
     CodexPrepare(ContextPayload),
+    #[serde(rename = "codex.approval")]
+    CodexApproval(ContextPayload),
     #[serde(rename = "codex.start")]
     CodexStart(ContextPayload),
     #[serde(rename = "codex.events")]
@@ -210,6 +212,7 @@ impl Payload {
             Self::ContextSourcePreview(_) => "context.sourcePreview",
             Self::CodexStatus(_) => "codex.status",
             Self::CodexPrepare(_) => "codex.prepare",
+            Self::CodexApproval(_) => "codex.approval",
             Self::CodexStart(_) => "codex.start",
             Self::CodexEvents(_) => "codex.events",
             Self::CodexCancel(_) => "codex.cancel",
@@ -246,6 +249,7 @@ impl Payload {
             | Self::ContextIndex(data)
             | Self::ContextSourcePreview(data)
             | Self::CodexPrepare(data)
+            | Self::CodexApproval(data)
             | Self::CodexStart(data)
             | Self::CodexEvents(data)
             | Self::CodexCancel(data) => {
@@ -279,6 +283,18 @@ pub struct Response {
 }
 
 impl Response {
+    pub fn codex_approval(self) -> Result<CodexApproval, ErrorCode> {
+        match self.body {
+            Body::Success {
+                payload: Payload::CodexApproval(data),
+                ..
+            } => serde_json::from_value(serde_json::Value::Object(data.data))
+                .map_err(|_| ErrorCode::InvalidResponse),
+            Body::Failure { error, .. } => Err(error.code),
+            _ => Err(ErrorCode::InvalidResponse),
+        }
+    }
+
     fn matches(&self, id: &str, operation: Operation<'_>) -> bool {
         self.version == VERSION
             && self.id == id
@@ -302,6 +318,7 @@ impl Response {
                             | Payload::ContextSourcePreview(data)
                             | Payload::CodexStatus(data)
                             | Payload::CodexPrepare(data)
+                            | Payload::CodexApproval(data)
                             | Payload::CodexStart(data)
                             | Payload::CodexEvents(data)
                             | Payload::CodexCancel(data) => {
@@ -425,6 +442,33 @@ pub struct CodexSelection {
     chunk: Option<u32>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CodexMode {
+    VerifiedIsolated,
+    MockDevelopment,
+    UnconfinedWorkspaceDevelopment,
+}
+
+#[derive(Deserialize)]
+pub struct CodexApprovalSource {
+    pub path: String,
+    pub bytes: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexApproval {
+    pub mode: CodexMode,
+    pub grant_id: String,
+    pub manifest_digest: String,
+    pub project_name: String,
+    pub snapshot_digest: String,
+    pub sources: Vec<CodexApprovalSource>,
+    pub source_bytes: u32,
+    pub prompt_bytes: u32,
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(
     tag = "operation",
@@ -442,6 +486,13 @@ pub enum CodexRequest {
         question: String,
         selection: Vec<CodexSelection>,
     },
+    #[serde(rename = "codex.approval", skip_deserializing)]
+    Approval {
+        project_id: String,
+        context_id: String,
+        grant_id: String,
+        manifest_digest: String,
+    },
     #[serde(rename = "codex.start")]
     Start {
         project_id: String,
@@ -450,6 +501,8 @@ pub enum CodexRequest {
         manifest_digest: String,
         #[serde(skip_deserializing)]
         confirmed: bool,
+        #[serde(skip_deserializing, skip_serializing_if = "std::ops::Not::not")]
+        unconfined_confirmed: bool,
     },
     #[serde(rename = "codex.events")]
     Events {
@@ -471,6 +524,7 @@ impl CodexRequest {
         match self {
             Self::Status { .. } => "codex.status",
             Self::Prepare { .. } => "codex.prepare",
+            Self::Approval { .. } => "codex.approval",
             Self::Start { .. } => "codex.start",
             Self::Events { .. } => "codex.events",
             Self::Cancel { .. } => "codex.cancel",
@@ -481,6 +535,7 @@ impl CodexRequest {
         match self {
             Self::Status { project_id }
             | Self::Prepare { project_id, .. }
+            | Self::Approval { project_id, .. }
             | Self::Start { project_id, .. }
             | Self::Events { project_id, .. }
             | Self::Cancel { project_id, .. } => project_id,
@@ -491,6 +546,7 @@ impl CodexRequest {
         match self {
             Self::Status { .. } => None,
             Self::Prepare { context_id, .. }
+            | Self::Approval { context_id, .. }
             | Self::Start { context_id, .. }
             | Self::Events { context_id, .. }
             | Self::Cancel { context_id, .. } => Some(context_id),
@@ -650,6 +706,23 @@ impl Sidecar {
         #[cfg(windows)]
         command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
 
+        #[cfg(all(windows, debug_assertions, not(feature = "custom-protocol")))]
+        match std::env::var("LAPLACE_CODEX_DEV").as_deref() {
+            Ok("mock") => {
+                command.arg("--codex-mock").arg(
+                    std::env::var("LAPLACE_CODEX_MOCK_SCENARIO")
+                        .unwrap_or_else(|_| "fragmented".into()),
+                );
+            }
+            Ok("workspace") => {
+                let helper = std::env::current_exe()
+                    .map_err(|_| ErrorCode::ServiceUnavailable)?
+                    .with_file_name("laplace-codex-job.exe");
+                command.arg("--codex-workspace").arg(helper);
+            }
+            _ => {}
+        }
+
         let mut child = command.spawn().map_err(|error| {
             eprintln!("[laplace:host] sidecar spawn failed ({:?})", error.kind());
             ErrorCode::ServiceUnavailable
@@ -768,5 +841,16 @@ mod codex_tests {
         assert_eq!(operation.name(), "codex.start");
         assert_eq!(operation.project_id(), fields["projectId"].as_str());
         assert_eq!(operation.snapshot_id(), fields["contextId"].as_str());
+
+        let mut workspace = fields.clone();
+        workspace.as_object_mut().unwrap().remove("confirmed");
+        workspace["unconfinedConfirmed"] = true.into();
+        assert!(serde_json::from_value::<CodexRequest>(workspace.clone()).is_err());
+        workspace
+            .as_object_mut()
+            .unwrap()
+            .remove("unconfinedConfirmed");
+        workspace["operation"] = "codex.approval".into();
+        assert!(serde_json::from_value::<CodexRequest>(workspace).is_err());
     }
 }

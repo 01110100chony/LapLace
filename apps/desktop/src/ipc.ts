@@ -30,10 +30,11 @@ type DesktopCommand =
   | "context_source_preview"
   | "codex_request";
 type PickerOperation = "workspace.addLocal" | "project.relocate";
+type DesktopOperation = Exclude<Operation, "codex.approval">;
 type InvokeArgs = Record<string, unknown>;
 type Invoke = (command: DesktopCommand, args: InvokeArgs) => Promise<unknown>;
 
-const commands: Record<Operation, DesktopCommand> = {
+const commands: Record<DesktopOperation, DesktopCommand> = {
   health: "service_health",
   "workspace.list": "workspace_list",
   "workspace.addLocal": "workspace_add_local",
@@ -70,11 +71,11 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
     operation: PickerOperation,
     args?: InvokeArgs,
   ): Promise<Results[PickerOperation] | null>;
-  async function request<K extends Exclude<Operation, PickerOperation>>(
+  async function request<K extends Exclude<DesktopOperation, PickerOperation>>(
     operation: K,
     args?: InvokeArgs,
   ): Promise<Results[K]>;
-  async function request<K extends Operation>(
+  async function request<K extends DesktopOperation>(
     operation: K,
     args: InvokeArgs = {},
   ): Promise<Results[K] | null> {
@@ -165,6 +166,7 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
         contextId,
         grantId,
         manifestDigest,
+        mode,
       }: CodexPreview) {
         const execution = await request("codex.start", {
           projectId,
@@ -172,12 +174,21 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
           grantId,
           manifestDigest,
         });
-        if (execution.manifestDigest !== manifestDigest)
+        if (
+          execution.manifestDigest !== manifestDigest ||
+          execution.mode !== mode
+        )
           throw new DesktopError("invalid_response");
         return execution;
       },
       async events(
-        { projectId, contextId, executionId, manifestDigest }: CodexExecution,
+        {
+          projectId,
+          contextId,
+          executionId,
+          manifestDigest,
+          mode,
+        }: CodexExecution,
         afterSeq: number,
       ) {
         const page = await request("codex.events", {
@@ -189,6 +200,7 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
         if (
           page.executionId !== executionId ||
           page.manifestDigest !== manifestDigest ||
+          page.mode !== mode ||
           page.nextSeq !== afterSeq + page.events.length ||
           (page.more && !page.events.length)
         )

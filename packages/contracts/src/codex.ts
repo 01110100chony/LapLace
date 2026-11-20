@@ -12,6 +12,13 @@ export const codexMaxLineBytes = 24 * 1024;
 export const codexMaxOutputBytes = 512 * 1024;
 export const codexPageSize = 4;
 
+export const codexModes = [
+  "verified_isolated",
+  "mock_development",
+  "unconfined_workspace_development",
+] as const;
+export type CodexMode = (typeof codexModes)[number];
+
 export type CodexSelection = {
   path: string;
   sha256: string;
@@ -30,9 +37,12 @@ export const codexAvailability = [
   "unauthenticated",
   "confinement_unverified",
   "ready",
+  "mock_ready",
+  "workspace_ready",
 ] as const;
 export type CodexStatus = {
   projectId: string;
+  mode: CodexMode;
   state: (typeof codexAvailability)[number];
   version: string | null;
 };
@@ -50,9 +60,10 @@ export type CodexSource = CodexSelection & {
 };
 export type CodexManifest = Scope & {
   schemaVersion: 1;
+  mode: CodexMode;
   snapshotDigest: string;
   capturedAt: string;
-  provider: typeof codexProvider;
+  provider: typeof codexProvider | "mock";
   profile: "read-only";
   question: string;
   sources: CodexSource[];
@@ -80,6 +91,7 @@ export const codexStates = [
 export type CodexState = (typeof codexStates)[number];
 export const codexFailures = [
   "launch_failed",
+  "authentication_failed",
   "provider_failed",
   "protocol_error",
   "output_limit",
@@ -103,8 +115,18 @@ export type CodexEvent = { seq: number } & (
     }
 );
 export type CodexExecution = Scope & {
+  mode: CodexMode;
   executionId: string;
   manifestDigest: string;
+};
+type Grant = Scope & { grantId: string; manifestDigest: string };
+export type CodexApproval = Grant & {
+  mode: CodexMode;
+  projectName: string;
+  snapshotDigest: string;
+  sources: { path: string; bytes: number }[];
+  sourceBytes: number;
+  promptBytes: number;
 };
 export type CodexPage = CodexExecution & {
   state: CodexState;
@@ -117,18 +139,19 @@ export type CodexRequests =
   | (Scope &
       (
         | ({ operation: "codex.prepare" } & CodexPrepare)
-        | {
+        | ({ operation: "codex.approval" } & Grant)
+        | ({
             operation: "codex.start";
-            grantId: string;
-            manifestDigest: string;
             confirmed: true;
-          }
+            unconfinedConfirmed?: true;
+          } & Grant)
         | { operation: "codex.events"; executionId: string; afterSeq: number }
         | { operation: "codex.cancel"; executionId: string }
       ));
 export type CodexResults = {
   "codex.status": CodexStatus;
   "codex.prepare": CodexPreview;
+  "codex.approval": CodexApproval;
   "codex.start": CodexExecution;
   "codex.events": CodexPage;
   "codex.cancel": CodexExecution;
@@ -176,6 +199,7 @@ export function parseCodexRequest(
     grantId,
     manifestDigest,
     confirmed,
+    unconfinedConfirmed,
     executionId,
     afterSeq,
   } = value;
@@ -207,14 +231,18 @@ export function parseCodexRequest(
         selection: entries,
       };
     }
-    case "codex.start":
+    case "codex.approval":
+    case "codex.start": {
+      if (!isRequestId(grantId) || !isProjectId(manifestDigest)) return;
+      const grant = { ...scope, grantId, manifestDigest };
+      if (operation === "codex.approval") return { operation, ...grant };
       if (
-        isRequestId(grantId) &&
-        isProjectId(manifestDigest) &&
-        confirmed === true
+        confirmed === true &&
+        (unconfinedConfirmed === undefined || unconfinedConfirmed === true)
       )
-        return { operation, ...scope, grantId, manifestDigest, confirmed };
+        return { operation, ...grant, confirmed, unconfinedConfirmed };
       break;
+    }
     case "codex.events":
       if (
         isRequestId(executionId) &&
@@ -293,17 +321,44 @@ export function isCodexResult(
   value: unknown,
 ): boolean {
   if (!isRecord(value) || !isProjectId(value.projectId)) return false;
+  if (!oneOf(codexModes, value.mode)) return false;
   if (operation === "codex.status")
     return (
       oneOf(codexAvailability, value.state) &&
+      (value.mode === "mock_development") === (value.state === "mock_ready") &&
+      (value.state !== "ready" || value.mode === "verified_isolated") &&
+      (value.state !== "workspace_ready" ||
+        value.mode === "unconfined_workspace_development") &&
       (value.version === null || limit(value.version, 64))
     );
   if (!isProjectId(value.contextId) || !isProjectId(value.manifestDigest))
     return false;
+  if (operation === "codex.approval") {
+    return (
+      isRequestId(value.grantId) &&
+      isProjectId(value.snapshotDigest) &&
+      limit(value.projectName, 4096) &&
+      count(value.sourceBytes) &&
+      value.sourceBytes <= codexMaxSourceBytes &&
+      count(value.promptBytes) &&
+      value.promptBytes <= codexMaxPromptBytes &&
+      Array.isArray(value.sources) &&
+      value.sources.length > 0 &&
+      value.sources.length <= codexMaxSources &&
+      value.sources.every(
+        (source: unknown) =>
+          isRecord(source) &&
+          isContextPath(source.path) &&
+          count(source.bytes) &&
+          source.bytes <= codexMaxSourceBytes,
+      )
+    );
+  }
   if (operation === "codex.prepare") {
     return (
       value.schemaVersion === 1 &&
-      value.provider === codexProvider &&
+      value.provider ===
+        (value.mode === "mock_development" ? "mock" : codexProvider) &&
       value.profile === "read-only" &&
       isProjectId(value.snapshotDigest) &&
       isContextDate(value.capturedAt) &&

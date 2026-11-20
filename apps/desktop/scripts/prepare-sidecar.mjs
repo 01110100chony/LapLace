@@ -20,6 +20,7 @@ const output = fileURLToPath(
 const target =
   process.env.TAURI_ENV_TARGET_TRIPLE ||
   execFileSync("rustc", ["--print", "host-tuple"], { encoding: "utf8" }).trim();
+const development = process.argv[2] === "--development";
 
 if (
   process.platform !== "win32" ||
@@ -107,5 +108,58 @@ await build({
   platform: "node",
   target: "node24",
   format: "cjs",
+  define: {
+    __LAPLACE_DEVELOPMENT__: JSON.stringify(development),
+  },
 });
 await prepareNotices(target, output);
+
+if (development && process.env.LAPLACE_CODEX_DEV === "workspace") {
+  const manifest = fileURLToPath(
+    new URL("../src-tauri/Cargo.toml", import.meta.url),
+  );
+  const { target_directory: desktopTarget } = JSON.parse(
+    execFileSync(
+      "cargo",
+      [
+        "metadata",
+        "--format-version",
+        "1",
+        "--no-deps",
+        "--manifest-path",
+        manifest,
+      ],
+      { encoding: "utf8" },
+    ),
+  );
+  const jobManifest = fileURLToPath(
+    new URL("../src-tauri/codex-job/Cargo.toml", import.meta.url),
+  );
+  const jobTarget = join(output, "codex-job");
+  execFileSync(
+    "cargo",
+    [
+      "build",
+      "--locked",
+      "--release",
+      "--manifest-path",
+      jobManifest,
+      "--target",
+      target,
+      "--target-dir",
+      jobTarget,
+    ],
+    { stdio: "inherit" },
+  );
+  const helper = "laplace-codex-job.exe";
+  for (const dir of [
+    join(desktopTarget, target, "debug"),
+    join(desktopTarget, "debug"),
+  ]) {
+    await mkdir(dir, { recursive: true });
+    await copyFile(
+      join(jobTarget, target, "release", helper),
+      join(dir, helper),
+    );
+  }
+}
