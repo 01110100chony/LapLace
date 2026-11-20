@@ -8,6 +8,7 @@
     "test": "node --test test/*.test.ts"
   },
   "dependencies": {
+    "@laplace/agents": "workspace:*",
     "@laplace/contracts": "workspace:*"
   }
 }

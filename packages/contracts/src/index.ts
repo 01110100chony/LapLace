@@ -28,6 +28,11 @@ export const errorCodes = [
   "context_index_failed",
   "context_search_query",
   "context_source_unavailable",
+  "codex_selection_invalid",
+  "codex_authorization_required",
+  "codex_unavailable",
+  "codex_busy",
+  "codex_execution_unavailable",
 ] as const;
 
 export type ErrorCode = (typeof errorCodes)[number];
@@ -62,14 +67,15 @@ export type Catalog = {
   selectedProjectId: string | null;
 };
 
-export type Results = ContextResults & {
-  health: Health;
-  "workspace.list": Catalog;
-  "workspace.addLocal": Project;
-  "project.select": SelectedProject;
-  "project.inspect": Project;
-  "project.relocate": Project;
-};
+export type Results = ContextResults &
+  CodexResults & {
+    health: Health;
+    "workspace.list": Catalog;
+    "workspace.addLocal": Project;
+    "project.select": SelectedProject;
+    "project.inspect": Project;
+    "project.relocate": Project;
+  };
 export type Operation = keyof Results;
 type Envelope = { version: typeof protocolVersion; id: string };
 export type Request = Envelope &
@@ -80,6 +86,7 @@ export type Request = Envelope &
     | { operation: "project.select" | "project.inspect"; projectId: string }
     | { operation: "project.relocate"; projectId: string; path: string }
     | ContextRequests
+    | CodexRequests
   );
 export type Response<K extends Operation = Operation> =
   | { [P in K]: Envelope & { operation: P; ok: true; data: Results[P] } }[K]
@@ -112,6 +119,8 @@ export function parseRequest(value: unknown): Request | undefined {
   const envelope = { id: value.id, version: protocolVersion } as const;
   const context = parseContextRequest(value);
   if (context) return { ...envelope, ...context };
+  const codex = parseCodexRequest(value);
+  if (codex) return { ...envelope, ...codex };
   if (value.operation === "health") return { ...envelope, operation: "health" };
   if (value.operation === "workspace.list")
     return { ...envelope, operation: "workspace.list" };
@@ -210,6 +219,14 @@ export function isResponse<K extends Operation>(
   if (operation === "health") return isHealth(value.data);
   if (operation === "workspace.list") return isCatalog(value.data);
   if (
+    operation === "codex.status" ||
+    operation === "codex.prepare" ||
+    operation === "codex.start" ||
+    operation === "codex.events" ||
+    operation === "codex.cancel"
+  )
+    return isCodexResult(operation, value.data);
+  if (
     operation === "context.browse" ||
     operation === "context.capture" ||
     operation === "context.list" ||
@@ -235,3 +252,10 @@ import {
 
 export * from "./context.ts";
 export * from "./context-search.ts";
+export * from "./codex.ts";
+import {
+  isCodexResult,
+  parseCodexRequest,
+  type CodexRequests,
+  type CodexResults,
+} from "./codex.ts";

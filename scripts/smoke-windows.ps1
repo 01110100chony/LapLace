@@ -115,13 +115,14 @@ try {
     ) $gitPath
     Assert-Smoke ($indexed.ok -and $indexed.data.files -eq 1 -and $indexed.data.chunks -eq 1) 'Installed sidecar could not index the capture.'
     Rename-Item -LiteralPath $repo.FullName -NewName 'Moved repo'
-    $unavailable, $saved, $history, $context, $search, $preview = Invoke-Sidecar @(
+    $unavailable, $saved, $history, $context, $search, $preview, $codex = Invoke-Sidecar @(
         @{ operation = 'project.inspect'; projectId = $id },
         @{ operation = 'workspace.list' },
         @{ operation = 'context.list'; projectId = $id; before = $null },
         @{ operation = 'context.get'; projectId = $id; contextId = $contextId },
         @{ operation = 'context.search'; projectId = $id; scope = 'latest'; contextId = $null; query = 'fixture'; offset = 0 },
-        @{ operation = 'context.sourcePreview'; projectId = $id; contextId = $contextId; path = 'untracked.txt'; sha256 = $fileHash; chunk = 0 }
+        @{ operation = 'context.sourcePreview'; projectId = $id; contextId = $contextId; path = 'untracked.txt'; sha256 = $fileHash; chunk = 0 },
+        @{ operation = 'codex.prepare'; projectId = $id; contextId = $contextId; question = 'O que diz a captura?'; snapshotDigest = $capture.data.digest; selection = @(@{ path = 'untracked.txt'; sha256 = $fileHash; chunk = 0 }) }
     ) $gitPath
     Assert-Smoke (!$unavailable.ok -and $unavailable.error.code -eq 'project_unavailable' -and
         $saved.ok -and $saved.data.selectedProjectId -eq $id) 'Unavailable repository damaged persisted state.'
@@ -131,12 +132,15 @@ try {
     Assert-Smoke ($search.ok -and $search.data.items.Count -eq 1 -and
         $search.data.items[0].contextId -eq $contextId -and $search.data.items[0].sha256 -eq $fileHash -and
         $preview.ok -and $preview.data.firstLine -eq 1 -and $preview.data.text.Trim() -eq 'fixture') 'FTS5 or the preserved preview failed after restart.'
+    Assert-Smoke ($codex.ok -and $codex.data.provider -eq 'openai' -and
+        $codex.data.snapshotDigest -eq $capture.data.digest -and
+        $codex.data.sources[0].sentSha256 -eq $fileHash) 'Installed sidecar failed to prepare the preserved Codex selection.'
 
     $db = Join-Path $data 'catalog.sqlite3'
     Assert-Smoke (Test-Path -LiteralPath $db -PathType Leaf) 'SQLite catalog was not created.'
     $sqlite = & $sidecar -e 'const {DatabaseSync} = require(''node:sqlite''); const db = new DatabaseSync(process.argv[1], { readOnly: true }); process.stdout.write(JSON.stringify({ version: process.versions.sqlite, journal: db.prepare(''PRAGMA journal_mode'').get().journal_mode, integrity: db.prepare(''PRAGMA integrity_check'').get().integrity_check })); db.close();' $db | ConvertFrom-Json
     Assert-Smoke ($LASTEXITCODE -eq 0 -and $sqlite.journal -eq 'delete' -and $sqlite.integrity -eq 'ok') 'Unexpected SQLite journal mode or integrity result.'
-    Write-Output "Smoke passed. Node.js $version, SQLite $($sqlite.version) ($($sqlite.journal)). IPC, Git, context capture, FTS5, restart, recovery and EOF verified."
+    Write-Output "Smoke passed. Node.js $version, SQLite $($sqlite.version) ($($sqlite.journal)). IPC, Git, context capture, FTS5, Codex preview, restart, recovery and EOF verified."
 } finally {
     if (Test-Path -LiteralPath $uninstaller -PathType Leaf) {
         $uninstall = Start-Process -FilePath $uninstaller -ArgumentList '/S' -WindowStyle Hidden -Wait -PassThru

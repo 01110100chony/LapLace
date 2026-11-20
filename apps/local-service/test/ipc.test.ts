@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import { once } from "node:events";
-import { realpathSync } from "node:fs";
+import { readFileSync, readdirSync, realpathSync } from "node:fs";
 import {
   cp,
   mkdtemp,
@@ -18,6 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
+import { setTimeout as delay } from "node:timers/promises";
 import { test, type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
@@ -27,9 +28,13 @@ import {
   maxContextSearchOffset,
   maxContextSnippetBytes,
   protocolVersion,
+  type CodexEvent,
   type Operation,
   type Results,
 } from "@laplace/contracts";
+
+import { openCatalog } from "../src/catalog.ts";
+import { CodexQueries, prepareCodex } from "../src/codex.ts";
 
 const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
 
@@ -1047,5 +1052,292 @@ test(
     } finally {
       store.close();
     }
+  },
+);
+
+test(
+  "prepara exclusivamente bytes históricos e exige confirmação e confinamento",
+  { timeout: 30_000 },
+  async (t) => {
+    const env = await fixture(t);
+    const root = await env.repository("Consulta A");
+    const other = await env.repository("Consulta B");
+    const path = "função.ts";
+    const historical =
+      "\uFEFF// registro histórico\r\n".repeat(25) +
+      "export const exemplo = 73;\r\n";
+    await writeFile(join(root, path), historical);
+    await writeFile(join(root, "fora.txt"), "Omitido do envio");
+    await writeFile(join(other, path), "Outro projeto");
+    const service = env.start();
+    const { id: projectId } = await service.request("workspace.addLocal", {
+      path: root,
+    });
+    const { id: otherProject } = await service.request("workspace.addLocal", {
+      path: other,
+    });
+    const snapshot = await service.request("context.capture", {
+      projectId,
+      paths: [path, "fora.txt"],
+    });
+    const second = await service.request("context.capture", {
+      projectId: otherProject,
+      paths: [path],
+    });
+    assert.notEqual(snapshot.contextId, second.contextId);
+    const scope = { projectId, contextId: snapshot.contextId };
+    await service.request("context.index", { ...scope, force: false });
+    await writeFile(join(root, path), "A versão atual não pertence à captura.");
+    const originalState = git(root, "status", "--porcelain");
+    const search = await service.request("context.search", {
+      ...scope,
+      scope: "snapshot",
+      query: "exemplo",
+      offset: 0,
+    });
+    const hit = search.items[0]!;
+    assert.ok(hit.text.includes("exemplo = 73"));
+    const request = {
+      ...scope,
+      question: "Qual é o valor histórico de exemplo?",
+      snapshotDigest: snapshot.digest,
+      selection: [{ path, sha256: hit.sha256, chunk: hit.chunk }],
+    };
+    await assert.rejects(
+      service.request("codex.prepare", { ...request, projectId: otherProject }),
+      { message: "context_not_found" },
+    );
+    await assert.rejects(
+      service.request("codex.prepare", {
+        ...request,
+        snapshotDigest: "0".repeat(64),
+      }),
+      { message: "codex_selection_invalid" },
+    );
+    await assert.rejects(
+      service.request("codex.prepare", {
+        ...request,
+        selection: [{ path, sha256: "0".repeat(64), chunk: null }],
+      }),
+      { message: "codex_selection_invalid" },
+    );
+    await assert.rejects(
+      service.request("codex.prepare", {
+        ...request,
+        selection: [{ path: "../canary.txt", sha256: hit.sha256, chunk: null }],
+      }),
+      { message: "invalid_request" },
+    );
+
+    const preview = await service.request("codex.prepare", request);
+    assert.equal(preview.provider, "openai");
+    assert.equal(preview.sources[0]?.range?.firstLine, hit.firstLine);
+    assert.equal(preview.sources[0]?.bytes, Buffer.byteLength(hit.text));
+    assert.deepEqual(preview.omissions, [
+      { path: "fora.txt", reason: "not_selected" },
+      { path, reason: "outside_excerpt" },
+    ]);
+    const approval = {
+      ...scope,
+      grantId: preview.grantId,
+      manifestDigest: preview.manifestDigest,
+    };
+    await assert.rejects(service.request("codex.start", approval), {
+      message: "invalid_request",
+    });
+    await assert.rejects(
+      service.request("codex.start", {
+        ...approval,
+        confirmed: true,
+        projectId: otherProject,
+      }),
+      { message: "codex_authorization_required" },
+    );
+    await assert.rejects(
+      service.request("codex.start", {
+        ...approval,
+        confirmed: true,
+        manifestDigest: "0".repeat(64),
+      }),
+      { message: "codex_authorization_required" },
+    );
+    await assert.rejects(
+      service.request("codex.start", { ...approval, confirmed: true }),
+      { message: "codex_unavailable" },
+    );
+    assert.equal(git(root, "status", "--porcelain"), originalState);
+    assert.equal(
+      await readFile(join(root, path), "utf8"),
+      "A versão atual não pertence à captura.",
+    );
+    const beforeRestart = await service.request("codex.prepare", request);
+    await service.close();
+    const restarted = env.start();
+    await assert.rejects(
+      restarted.request("codex.start", {
+        ...approval,
+        grantId: beforeRestart.grantId,
+        confirmed: true,
+      }),
+      { message: "codex_authorization_required" },
+    );
+    const reopened = await restarted.request("codex.prepare", request);
+    assert.equal(reopened.manifestDigest, preview.manifestDigest);
+    assert.notEqual(reopened.grantId, preview.grantId);
+    await restarted.close();
+  },
+);
+
+test(
+  "materializa o trecho histórico e supervisiona uma tentativa autorizada com processo fictício",
+  { timeout: 30_000 },
+  async (t) => {
+    const env = await fixture(t);
+    const root = await env.repository("Seleção materializada");
+    const sourcePath = "src/registro.ts";
+    await mkdir(join(root, "src"));
+    await writeFile(
+      join(root, sourcePath),
+      "// histórico\r\n".repeat(24) + "export const valor = 73;\r\n",
+    );
+    await writeFile(join(root, "outro.txt"), "outro arquivo");
+    const service = env.start();
+    const { id: projectId } = await service.request("workspace.addLocal", {
+      path: root,
+    });
+    const snapshot = await service.request("context.capture", {
+      projectId,
+      paths: [sourcePath, "outro.txt"],
+    });
+    const scope = { projectId, contextId: snapshot.contextId };
+    await service.request("context.index", { ...scope, force: false });
+    const page = await service.request("context.search", {
+      ...scope,
+      query: "valor",
+      scope: "snapshot",
+      offset: 0,
+    });
+    const result = page.items[0]!;
+    assert.equal(result.firstLine, 25);
+    await writeFile(join(root, sourcePath), "// versão atual\n");
+    const tree = git(root, "status", "--porcelain");
+    await service.close();
+
+    const catalog = openCatalog(env.dataDir);
+    const prepared = (() => {
+      try {
+        return prepareCodex(
+          catalog,
+          {
+            ...scope,
+            snapshotDigest: snapshot.digest,
+            question: "Qual era o valor?",
+            selection: [
+              { path: sourcePath, sha256: result.sha256, chunk: result.chunk },
+            ],
+          },
+          env.dataDir,
+        );
+      } finally {
+        catalog.close();
+      }
+    })();
+    let workspacePath = "";
+    let launched = 0;
+    const queries = new CodexQueries({
+      detect: async () => ({
+        availability: { state: "confinement_unverified", version: "0.141.0" },
+        installation: { executable: process.execPath, version: "0.141.0" },
+      }),
+      boundary: {
+        async verify() {
+          return true;
+        },
+        start(file, args, { cwd, workspace }) {
+          workspacePath = workspace;
+          launched++;
+          assert.deepEqual(readdirSync(cwd), []);
+          assert.deepEqual(readdirSync(join(workspace, "sources")), ["src"]);
+          assert.deepEqual(
+            readFileSync(join(workspace, "sources", sourcePath)),
+            Buffer.from(result.text),
+          );
+          const saved = JSON.parse(
+            readFileSync(join(workspace, "selection.json"), "utf8"),
+          );
+          assert.equal(saved.manifestDigest, prepared.preview.manifestDigest);
+          assert.equal(saved.grantId, undefined);
+          assert.ok(!args.includes(prepared.preview.question));
+          const child = spawn(
+            file,
+            [
+              "-e",
+              `
+          const bytes = [];
+          process.stdin.on('data', (part) => bytes.push(part));
+          process.stdin.on('end', () => {
+            const data = JSON.parse(Buffer.concat(bytes).toString('utf8').split('\\n\\n')[1]);
+            if (data.sources.length !== 1 || data.sources[0].text !== 'export const valor = 73;\\r\\n') process.exit(7);
+            console.log(JSON.stringify({ type: 'thread.started', thread_id: 'mock-process' }));
+            console.log(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'O valor histórico era 73.' } }));
+            console.log(JSON.stringify({ type: 'turn.completed' }));
+          });
+        `,
+            ],
+            { cwd, stdio: "pipe", windowsHide: true },
+          );
+          return {
+            child,
+            stop: () => {
+              child.kill();
+            },
+          };
+        },
+      },
+    });
+    t.after(() => queries.close());
+    const preview = queries.prepare(prepared);
+    const approval = {
+      ...scope,
+      operation: "codex.start",
+      confirmed: true,
+      grantId: preview.grantId,
+      manifestDigest: preview.manifestDigest,
+    } as const;
+    const execution = await queries.start(approval);
+    await assert.rejects(queries.start(approval), {
+      message: "codex_authorization_required",
+    });
+    const events: CodexEvent[] = [];
+    for (let i = 0; i < 100; i++) {
+      const batch = queries.events({
+        ...execution,
+        operation: "codex.events",
+        afterSeq: events.length,
+      });
+      events.push(...batch.events);
+      if (!batch.more && batch.state !== "running") break;
+      await delay(20);
+    }
+    assert.equal(launched, 1);
+    assert.ok(
+      events.some(
+        (event) =>
+          event.type === "message" &&
+          event.text === "O valor histórico era 73.",
+      ),
+    );
+    assert.deepEqual(events.at(-1), {
+      seq: events.length,
+      type: "terminal",
+      state: "completed",
+      failure: null,
+    });
+    await assert.rejects(stat(workspacePath), { code: "ENOENT" });
+    assert.equal(git(root, "status", "--porcelain"), tree);
+    assert.equal(
+      await readFile(join(root, sourcePath), "utf8"),
+      "// versão atual\n",
+    );
   },
 );

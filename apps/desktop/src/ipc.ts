@@ -2,6 +2,9 @@ import {
   isIpcError,
   isResponse,
   contextSearchPageSize,
+  type CodexExecution,
+  type CodexPrepare,
+  type CodexPreview,
   type ContextSearchInput,
   type ContextSourceRef,
   type ErrorCode,
@@ -24,9 +27,10 @@ type DesktopCommand =
   | "context_index_status"
   | "context_index"
   | "context_search"
-  | "context_source_preview";
+  | "context_source_preview"
+  | "codex_request";
 type PickerOperation = "workspace.addLocal" | "project.relocate";
-type InvokeArgs = Record<string, string | string[] | number | boolean | null>;
+type InvokeArgs = Record<string, unknown>;
 type Invoke = (command: DesktopCommand, args: InvokeArgs) => Promise<unknown>;
 
 const commands: Record<Operation, DesktopCommand> = {
@@ -45,6 +49,11 @@ const commands: Record<Operation, DesktopCommand> = {
   "context.index": "context_index",
   "context.search": "context_search",
   "context.sourcePreview": "context_source_preview",
+  "codex.status": "codex_request",
+  "codex.prepare": "codex_request",
+  "codex.start": "codex_request",
+  "codex.events": "codex_request",
+  "codex.cancel": "codex_request",
 };
 
 export class DesktopError extends Error {
@@ -74,19 +83,26 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
       operation === "workspace.addLocal" || operation === "project.relocate";
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      const call = invoke(commands[operation], { ...args, id });
+      const command = commands[operation];
+      const call = invoke(
+        command,
+        command === "codex_request"
+          ? { id, request: { operation, ...args } }
+          : { ...args, id },
+      );
       // The native picker may stay open as long as the user needs.
-      const response = picker
-        ? await call
-        : await Promise.race([
-            call,
-            new Promise<never>((_, reject) => {
-              timer = setTimeout(
-                () => reject(new DesktopError("ipc_timeout")),
-                deadlineMs,
-              );
-            }),
-          ]);
+      const response =
+        picker || operation === "codex.start"
+          ? await call
+          : await Promise.race([
+              call,
+              new Promise<never>((_, reject) => {
+                timer = setTimeout(
+                  () => reject(new DesktopError("ipc_timeout")),
+                  deadlineMs,
+                );
+              }),
+            ]);
       if (response === null && picker) return null;
       if (!isResponse(response, id, operation))
         throw new DesktopError("invalid_response");
@@ -124,6 +140,64 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
     select: (projectId: string) => request("project.select", { projectId }),
     inspect: (projectId: string) => request("project.inspect", { projectId }),
     relocate: (projectId: string) => request("project.relocate", { projectId }),
+    codex: {
+      status: (projectId: string) => request("codex.status", { projectId }),
+      async prepare(input: CodexPrepare) {
+        const preview = await request("codex.prepare", input);
+        if (
+          preview.snapshotDigest !== input.snapshotDigest ||
+          preview.question !== input.question ||
+          preview.sources.length !== input.selection.length ||
+          !input.selection.every((item) =>
+            preview.sources.some(
+              (source) =>
+                source.path === item.path &&
+                source.sha256 === item.sha256 &&
+                source.chunk === item.chunk,
+            ),
+          )
+        )
+          throw new DesktopError("invalid_response");
+        return preview;
+      },
+      async start({
+        projectId,
+        contextId,
+        grantId,
+        manifestDigest,
+      }: CodexPreview) {
+        const execution = await request("codex.start", {
+          projectId,
+          contextId,
+          grantId,
+          manifestDigest,
+        });
+        if (execution.manifestDigest !== manifestDigest)
+          throw new DesktopError("invalid_response");
+        return execution;
+      },
+      async events(
+        { projectId, contextId, executionId, manifestDigest }: CodexExecution,
+        afterSeq: number,
+      ) {
+        const page = await request("codex.events", {
+          projectId,
+          contextId,
+          executionId,
+          afterSeq,
+        });
+        if (
+          page.executionId !== executionId ||
+          page.manifestDigest !== manifestDigest ||
+          page.nextSeq !== afterSeq + page.events.length ||
+          (page.more && !page.events.length)
+        )
+          throw new DesktopError("invalid_response");
+        return page;
+      },
+      cancel: ({ projectId, contextId, executionId }: CodexExecution) =>
+        request("codex.cancel", { projectId, contextId, executionId }),
+    },
     context: {
       browse: (projectId: string, folder: string, prefix: string) =>
         request("context.browse", { projectId, folder, prefix }),
@@ -213,6 +287,15 @@ const messages: Record<ErrorCode, string> = {
     "Falha ao gravar o índice da captura. Tente indexar novamente.",
   context_search_query:
     "Informe entre 1 e 12 termos de busca com letras ou números.",
+  codex_selection_invalid:
+    "A seleção ou o digest da captura não corresponde às fontes preservadas.",
+  codex_authorization_required:
+    "Autorize o envio a partir de uma prévia válida.",
+  codex_unavailable:
+    "A consulta está indisponível. Verifique a instalação, a autenticação e o confinamento.",
+  codex_busy: "Aguarde ou cancele a consulta em andamento.",
+  codex_execution_unavailable:
+    "A execução não está disponível no serviço atual. Prepare uma nova tentativa.",
   context_source_unavailable:
     "A fonte preservada está indisponível ou não passou na verificação de integridade.",
 };

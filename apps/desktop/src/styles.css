@@ -756,6 +756,28 @@ h1 {
   margin-top: 4px;
 }
 
+.codex-form {
+  display: grid;
+  gap: 8px;
+  min-inline-size: 0;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+}
+
+.codex-form textarea {
+  resize: vertical;
+  padding: 8px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.codex-form textarea:focus-visible {
+  outline: 2px solid var(--focus);
+}
+
 @media (max-width: 920px) {
   .context-grid {
     grid-template-columns: 1fr;

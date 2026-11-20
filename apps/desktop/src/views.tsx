@@ -220,6 +220,7 @@ export function ProjectView({
   refresh,
   relocate,
   contextClient,
+  codexClient,
 }: {
   project: ProjectRecord;
   summary: GitObservation | undefined;
@@ -227,6 +228,7 @@ export function ProjectView({
   refresh: () => void;
   relocate: () => void;
   contextClient: ReturnType<typeof createDesktopClient>["context"];
+  codexClient: ReturnType<typeof createDesktopClient>["codex"];
 }) {
   const loading = status.state === "loading";
   const [section, setSection] = useState<"overview" | "context">("overview");
@@ -285,7 +287,9 @@ export function ProjectView({
         <ContextView
           key={`${project.id}/${project.root}`}
           projectId={project.id}
+          projectName={project.name}
           client={contextClient}
+          codex={codexClient}
         />
       ) : (
         summary && (

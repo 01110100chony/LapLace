@@ -202,6 +202,7 @@ export function App() {
               refresh={() => inspect(active)}
               relocate={() => relocateDialog.current?.showModal()}
               contextClient={desktop.context}
+              codexClient={desktop.codex}
             />
           ) : (
             <Home

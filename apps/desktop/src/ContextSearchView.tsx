@@ -45,10 +45,12 @@ function SourcePreview({
   data,
   snapshot,
   close,
+  offer,
 }: {
   data: ContextSourcePreview;
   snapshot: ContextSummary;
   close: () => void;
+  offer: () => void;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => heading.current?.focus(), [data]);
@@ -61,6 +63,9 @@ function SourcePreview({
         <h4 id="context-preview-heading" ref={heading} tabIndex={-1}>
           Fonte preservada
         </h4>
+        <button className="button" onClick={offer}>
+          Disponibilizar trecho para consulta
+        </button>
         <button className="button" onClick={close}>
           Fechar fonte
         </button>
@@ -100,10 +105,12 @@ export function ContextSearchView({
   projectId,
   client,
   selected,
+  onOfferExcerpt,
 }: {
   projectId: string;
   client: Client;
   selected: ContextSummary | undefined;
+  onOfferExcerpt: (excerpt: ContextSourcePreview) => void;
 }) {
   const [scope, setScope] = useState<ContextSearchInput["scope"]>(
     selected ? "snapshot" : "latest",
@@ -433,6 +440,7 @@ export function ContextSearchView({
       {preview && (
         <SourcePreview
           {...preview}
+          offer={() => onOfferExcerpt(preview.data)}
           close={() => {
             clearPreview();
             previewTrigger.current?.focus();

@@ -19,6 +19,7 @@
     "allow-context-index",
     "allow-context-search",
     "allow-context-source-preview",
+    "allow-codex-request",
     "core:window:allow-is-decorated",
     "core:window:allow-is-maximized",
     "core:window:allow-start-dragging",

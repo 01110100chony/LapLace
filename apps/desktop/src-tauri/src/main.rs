@@ -2,9 +2,9 @@
 
 mod ipc;
 
-use ipc::{ErrorCode, Fault, Operation, Response, SearchScope, Sidecar};
+use ipc::{CodexRequest, ErrorCode, Fault, Operation, Response, SearchScope, Sidecar};
 use tauri::{path::BaseDirectory, Manager, RunEvent, State, WebviewWindow};
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
 #[tauri::command]
 async fn service_health(id: String, sidecar: State<'_, Sidecar>) -> Result<Response, Fault> {
@@ -296,6 +296,38 @@ async fn context_source_preview(
         .map_err(Fault::from)
 }
 
+#[tauri::command]
+async fn codex_request(
+    id: String,
+    mut request: CodexRequest,
+    window: WebviewWindow,
+    sidecar: State<'_, Sidecar>,
+) -> Result<Response, Fault> {
+    if let CodexRequest::Start { confirmed, .. } = &mut request {
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        window
+            .dialog()
+            .message("Autoriza o envio da pergunta e das fontes da prévia para OpenAI Codex?")
+            .title("Autorizar consulta ao Codex")
+            .parent(&window)
+            .buttons(MessageDialogButtons::OkCancelCustom(
+                "Autorizar envio".into(),
+                "Cancelar".into(),
+            ))
+            .show(move |accepted| {
+                let _ = sender.send(accepted);
+            });
+        if !receiver.await.unwrap_or(false) {
+            return Err(ErrorCode::CodexAuthorizationRequired.into());
+        }
+        *confirmed = true;
+    }
+    sidecar
+        .request(id, Operation::Codex(&request))
+        .await
+        .map_err(Fault::from)
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -325,7 +357,8 @@ fn main() {
             context_index_status,
             context_index,
             context_search,
-            context_source_preview
+            context_source_preview,
+            codex_request
         ])
         .build(tauri::generate_context!())
         .expect("falha ao inicializar a janela do Laplace");

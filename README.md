@@ -68,6 +68,7 @@ apps/
   local-service/        Serviço Node, catálogo SQLite, inspeção Git e testes
 packages/
   contracts/            Tipos e validação do protocolo compartilhados em TypeScript
+  agents/               Detecção e adaptador não interativo do Codex
 ```
 
 O host expõe comandos específicos para a janela principal. Importação e relocalização obtêm o caminho com o diálogo nativo. O sidecar lista o catálogo, grava a seleção e resolve os IDs dos projetos para inspeção e captura. A comunicação usa JSON delimitado por linha em stdio, com protocolo v2, IDs, limite de 192 KiB por mensagem e prazo de 18 segundos no host. O resumo Git tem prazo próprio de 7 segundos. O seletor aguarda a decisão do usuário antes de iniciar a inspeção. O serviço inicia na primeira solicitação, é encerrado com a janela e pode ser recriado na próxima solicitação após falha de transporte.
@@ -205,3 +206,30 @@ O procedimento abaixo reproduz o smoke que o CI executa em um perfil descartáve
 O primeiro resultado do CI hospedado depende do envio autorizado da branch. A distribuição inicial é Windows x64. Assinatura digital e publicação de beta pertencem a uma entrega futura. O incremento previsto para a Sprint 2 é C01–C04 do roadmap, com captura de contexto, sessões, adaptador local de leitura e conversa com citações.
 
 O resumo observa branch, HEAD e contagens no momento da consulta. Alterações externas aparecem ao atualizar ou reabrir o projeto. A UI inicial usa o tema grafite do protótipo.
+
+## Consultar com Codex (C03)
+
+Em **Contexto**, abra uma captura preservada e selecione arquivos em **Consultar com Codex**. Para escolher um trecho, abra a prévia de um resultado da busca e clique em **Disponibilizar trecho para consulta**. Marque o trecho no painel, escreva a pergunta e clique em **Preparar prévia**. A prévia mostra o destino OpenAI Codex, a captura, os caminhos, os digests, os intervalos e as omissões. A autorização fica vinculada à pergunta, à seleção e ao digest mostrado e exige confirmação em diálogo nativo.
+
+**Estado de entrega.** O envio pelo desktop depende de uma fronteira de leitura validada. A instalação testada do Codex CLI 0.141.0 reportou autenticação via ChatGPT, mas a sonda do sandbox Windows ficou sem comprovação de negação de leitura do canário. O aplicativo bloqueia o envio nessa condição. A captura, a pesquisa e a prévia continuam disponíveis. A consulta remota autenticada e o critério de confinamento permanecem pendentes.
+
+### Contratos e limites
+
+- `codex.status` detecta o executável, valida a versão e os parâmetros pelo help, e consulta `login status`. O adaptador reconhece a série testada com correspondência exata a **0.141.0**. O destino deste perfil é o provedor OpenAI integrado à CLI. O Laplace delega a autenticação à CLI.
+- `codex.prepare` resolve o projeto e a captura pelo catálogo, confere o digest do manifesto C01 e verifica o SHA-256 dos blobs. Seleções C02 usam as coordenadas de bytes registradas no índice e os bytes preservados no C01. A prévia inclui um SHA-256 por trecho, o digest da entrada UTF-8 e um token de autorização efêmero. A autorização expira em cinco minutos ou ao preparar outra prévia.
+- `codex.start` consome uma autorização vinculada ao projeto, à captura e ao digest da seleção. Quando houver uma fronteira comprovada, o sidecar cria uma área descartável com o manifesto local e as fontes selecionadas em seus caminhos relativos. A CLI é iniciada num diretório vazio separado das fontes e recebe pergunta e conteúdo por stdin. O manifesto local registra os caminhos omitidos e os bytes fora dos trechos. Esses metadados de omissão ficam no Laplace.
+- `codex.events` pagina até quatro eventos por sequência. `codex.cancel` solicita o encerramento da tentativa ativa. O adaptador mantém uma tentativa em memória, com até oito fontes, um arquivo inteiro ou um trecho por caminho, 64 KiB de fontes, 128 KiB de entrada, 24 KiB por linha JSONL, 512 KiB de saída por fluxo e 120 s por consulta. Uma seleção acima do limite é recusada. O limite de 192 KiB do IPC e o esquema SQLite v4 seguem em uso.
+- As respostas do modelo são exibidas como texto do provedor. As referências verificadas pelo Laplace identificam os bytes escolhidos no manifesto da consulta. O adaptador entrega estados terminais de conclusão, falha, interrupção, timeout ou cancelamento e mantém erros de diagnóstico sem a saída bruta do CLI. Gravação de conversas e validação de citações ficam para C04.
+
+O perfil usa `exec --json --sandbox read-only --ephemeral --ignore-user-config --ignore-rules` com `approval_policy="never"`, sessões novas e ferramentas de shell, navegação e integrações de usuário desativadas na configuração. O código separado em `packages/agents` define a fronteira esperada para supervisão nativa, inclusive o controle da árvore de processos na perda do sidecar. O aplicativo instalado ainda não registra um executor nessa fronteira. O [modo não interativo oficial](https://developers.openai.com/codex/noninteractive/) e o [sandbox Windows](https://developers.openai.com/codex/windows/) descrevem as capacidades da CLI.
+
+### Verificação separada do confinamento
+
+Execute a sonda abaixo no Windows com o caminho do executável nativo. Ela usa um `CODEX_HOME` descartável e dados fictícios. O controle lê os dois arquivos diretamente. O resultado de confinamento exige que o mesmo processo leia a fonte autorizada e receba uma negação de acesso ao canário externo. Uma falha ao iniciar o processo ou ao ler a fonte autorizada deixa a política sem validação.
+
+```powershell
+$cli = (Get-Command codex.exe -CommandType Application | Select-Object -First 1).Source
+node scripts/probe-codex-read.mjs $cli
+```
+
+`pnpm test` usa processos fictícios para o fluxo de autorização, materialização, JSONL e encerramento. O smoke do NSIS também valida a preparação de um trecho histórico pelo sidecar instalado. Esses testes funcionam sem conta Codex e sem envio ao provedor.

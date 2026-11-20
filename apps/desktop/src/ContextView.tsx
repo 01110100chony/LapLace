@@ -5,12 +5,14 @@ import {
   type ContextHistory,
   type ContextIssue,
   type ContextSnapshot,
+  type ContextSourcePreview,
   type ContextStatus,
   type OmissionReason,
 } from "@laplace/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type createDesktopClient, errorMessage } from "./ipc";
 import { createLatestRequest } from "./workspace";
+import { CodexQueryView } from "./CodexQueryView";
 import { ContextSearchView } from "./ContextSearchView";
 
 type Client = ReturnType<typeof createDesktopClient>["context"];
@@ -122,10 +124,14 @@ function SnapshotDetail({
 
 export function ContextView({
   projectId,
+  projectName,
   client,
+  codex,
 }: {
   projectId: string;
+  projectName: string;
   client: Client;
+  codex: ReturnType<typeof createDesktopClient>["codex"];
 }) {
   const [browse, setBrowse] = useState<Load<ContextBrowse>>({
     state: "loading",
@@ -138,6 +144,7 @@ export function ContextView({
   const [manual, setManual] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [snapshot, setSnapshot] = useState<ContextSnapshot>();
+  const [excerpts, setExcerpts] = useState<ContextSourcePreview[]>([]);
   const [busy, setBusy] = useState(false);
   const [detailBusy, setDetailBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -206,6 +213,7 @@ export function ContextView({
       (data) => {
         setBusy(false);
         setSnapshot(data);
+        setExcerpts([]);
         readHistory();
       },
       (error) => {
@@ -215,7 +223,7 @@ export function ContextView({
     );
   }
 
-  function open(contextId: string) {
+  function open(contextId: string, excerpt?: ContextSourcePreview) {
     requests.validation.invalidate();
     setMessage("");
     setProblem("");
@@ -224,6 +232,19 @@ export function ContextView({
       () => client.get(projectId, contextId),
       (data) => {
         setSnapshot(data);
+        setExcerpts((old) =>
+          excerpt
+            ? [
+                ...old.filter(
+                  (item) =>
+                    item.contextId === contextId &&
+                    (item.path !== excerpt.path ||
+                      item.chunk !== excerpt.chunk),
+                ),
+                excerpt,
+              ].slice(-8)
+            : [],
+        );
         setDetailBusy(false);
       },
       (error) => {
@@ -265,6 +286,15 @@ export function ContextView({
         projectId={projectId}
         client={client}
         selected={snapshot}
+        onOfferExcerpt={(excerpt) => open(excerpt.contextId, excerpt)}
+      />
+      <CodexQueryView
+        key={snapshot?.contextId ?? projectId}
+        projectId={projectId}
+        projectName={projectName}
+        client={codex}
+        snapshot={snapshot}
+        excerpts={excerpts}
       />
       <div className="context-grid">
         <section className="panel" aria-labelledby="context-sources">

@@ -45,6 +45,11 @@ pub enum ErrorCode {
     ContextIndexFailed,
     ContextSearchQuery,
     ContextSourceUnavailable,
+    CodexSelectionInvalid,
+    CodexAuthorizationRequired,
+    CodexUnavailable,
+    CodexBusy,
+    CodexExecutionUnavailable,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -173,6 +178,16 @@ enum Payload {
     ContextSearch(ContextPayload),
     #[serde(rename = "context.sourcePreview")]
     ContextSourcePreview(ContextPayload),
+    #[serde(rename = "codex.status")]
+    CodexStatus(ContextPayload),
+    #[serde(rename = "codex.prepare")]
+    CodexPrepare(ContextPayload),
+    #[serde(rename = "codex.start")]
+    CodexStart(ContextPayload),
+    #[serde(rename = "codex.events")]
+    CodexEvents(ContextPayload),
+    #[serde(rename = "codex.cancel")]
+    CodexCancel(ContextPayload),
 }
 
 impl Payload {
@@ -193,6 +208,11 @@ impl Payload {
             Self::ContextIndex(_) => "context.index",
             Self::ContextSearch(_) => "context.search",
             Self::ContextSourcePreview(_) => "context.sourcePreview",
+            Self::CodexStatus(_) => "codex.status",
+            Self::CodexPrepare(_) => "codex.prepare",
+            Self::CodexStart(_) => "codex.start",
+            Self::CodexEvents(_) => "codex.events",
+            Self::CodexCancel(_) => "codex.cancel",
         }
     }
 
@@ -212,7 +232,7 @@ impl Payload {
             Self::Add(project) | Self::Inspect(project) | Self::Relocate(project) => {
                 project.record.valid() && project.summary.valid()
             }
-            Self::ContextBrowse(data) | Self::ContextList(data) => {
+            Self::ContextBrowse(data) | Self::ContextList(data) | Self::CodexStatus(data) => {
                 valid_project_id(&data.project_id) && data.context_id.is_none()
             }
             Self::ContextSearch(data) => {
@@ -224,7 +244,11 @@ impl Payload {
             | Self::ContextValidate(data)
             | Self::ContextIndexStatus(data)
             | Self::ContextIndex(data)
-            | Self::ContextSourcePreview(data) => {
+            | Self::ContextSourcePreview(data)
+            | Self::CodexPrepare(data)
+            | Self::CodexStart(data)
+            | Self::CodexEvents(data)
+            | Self::CodexCancel(data) => {
                 valid_project_id(&data.project_id)
                     && data.context_id.as_deref().is_some_and(valid_project_id)
             }
@@ -275,7 +299,12 @@ impl Response {
                             | Payload::ContextIndexStatus(data)
                             | Payload::ContextIndex(data)
                             | Payload::ContextSearch(data)
-                            | Payload::ContextSourcePreview(data) => {
+                            | Payload::ContextSourcePreview(data)
+                            | Payload::CodexStatus(data)
+                            | Payload::CodexPrepare(data)
+                            | Payload::CodexStart(data)
+                            | Payload::CodexEvents(data)
+                            | Payload::CodexCancel(data) => {
                                 data.project_id == id
                                     && operation.snapshot_id().is_none_or(|context_id| {
                                         data.context_id.as_deref() == Some(context_id)
@@ -384,6 +413,89 @@ pub enum Operation<'a> {
         sha256: &'a str,
         chunk: u32,
     },
+    #[serde(untagged)]
+    Codex(&'a CodexRequest),
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CodexSelection {
+    path: String,
+    sha256: String,
+    chunk: Option<u32>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(
+    tag = "operation",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum CodexRequest {
+    #[serde(rename = "codex.status")]
+    Status { project_id: String },
+    #[serde(rename = "codex.prepare")]
+    Prepare {
+        project_id: String,
+        context_id: String,
+        snapshot_digest: String,
+        question: String,
+        selection: Vec<CodexSelection>,
+    },
+    #[serde(rename = "codex.start")]
+    Start {
+        project_id: String,
+        context_id: String,
+        grant_id: String,
+        manifest_digest: String,
+        #[serde(skip_deserializing)]
+        confirmed: bool,
+    },
+    #[serde(rename = "codex.events")]
+    Events {
+        project_id: String,
+        context_id: String,
+        execution_id: String,
+        after_seq: u32,
+    },
+    #[serde(rename = "codex.cancel")]
+    Cancel {
+        project_id: String,
+        context_id: String,
+        execution_id: String,
+    },
+}
+
+impl CodexRequest {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Status { .. } => "codex.status",
+            Self::Prepare { .. } => "codex.prepare",
+            Self::Start { .. } => "codex.start",
+            Self::Events { .. } => "codex.events",
+            Self::Cancel { .. } => "codex.cancel",
+        }
+    }
+
+    fn project_id(&self) -> &str {
+        match self {
+            Self::Status { project_id }
+            | Self::Prepare { project_id, .. }
+            | Self::Start { project_id, .. }
+            | Self::Events { project_id, .. }
+            | Self::Cancel { project_id, .. } => project_id,
+        }
+    }
+
+    fn snapshot_id(&self) -> Option<&str> {
+        match self {
+            Self::Status { .. } => None,
+            Self::Prepare { context_id, .. }
+            | Self::Start { context_id, .. }
+            | Self::Events { context_id, .. }
+            | Self::Cancel { context_id, .. } => Some(context_id),
+        }
+    }
 }
 
 impl<'a> Operation<'a> {
@@ -404,6 +516,7 @@ impl<'a> Operation<'a> {
             Self::ContextIndex { .. } => "context.index",
             Self::ContextSearch { .. } => "context.search",
             Self::ContextSourcePreview { .. } => "context.sourcePreview",
+            Self::Codex(request) => request.name(),
         }
     }
 
@@ -421,6 +534,7 @@ impl<'a> Operation<'a> {
             | Self::ContextIndex { project_id, .. }
             | Self::ContextSearch { project_id, .. }
             | Self::ContextSourcePreview { project_id, .. } => Some(project_id),
+            Self::Codex(request) => Some(request.project_id()),
             _ => None,
         }
     }
@@ -433,6 +547,7 @@ impl<'a> Operation<'a> {
             | Self::ContextSourcePreview { context_id, .. } => Some(context_id),
             Self::ContextIndexStatus { context_id, .. }
             | Self::ContextSearch { context_id, .. } => context_id,
+            Self::Codex(request) => request.snapshot_id(),
             _ => None,
         }
     }
@@ -623,5 +738,35 @@ impl Sidecar {
         if let Some(process) = self.process.lock().await.take() {
             process.stop().await;
         }
+    }
+}
+
+#[cfg(test)]
+mod codex_tests {
+    use super::*;
+
+    #[test]
+    fn native_approval_is_not_accepted_from_renderer() {
+        let mut fields = serde_json::json!({
+            "operation": "codex.start",
+            "projectId": "a".repeat(64),
+            "contextId": "b".repeat(64),
+            "grantId": "fixture-grant",
+            "manifestDigest": "c".repeat(64)
+        });
+        let mut approved: CodexRequest = serde_json::from_value(fields.clone()).unwrap();
+        if let CodexRequest::Start { confirmed, .. } = &mut approved {
+            assert!(!*confirmed);
+            *confirmed = true;
+        } else {
+            panic!("expected start request");
+        }
+        fields["confirmed"] = true.into();
+        assert!(serde_json::from_value::<CodexRequest>(fields.clone()).is_err());
+        let operation = Operation::Codex(&approved);
+        assert_eq!(serde_json::to_value(operation).unwrap(), fields);
+        assert_eq!(operation.name(), "codex.start");
+        assert_eq!(operation.project_id(), fields["projectId"].as_str());
+        assert_eq!(operation.snapshot_id(), fields["contextId"].as_str());
     }
 }

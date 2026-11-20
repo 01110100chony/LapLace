@@ -66,6 +66,15 @@ importers:
 
   apps/local-service:
     dependencies:
+      '@laplace/agents':
+        specifier: workspace:*
+        version: link:../../packages/agents
+      '@laplace/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+
+  packages/agents:
+    dependencies:
       '@laplace/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts

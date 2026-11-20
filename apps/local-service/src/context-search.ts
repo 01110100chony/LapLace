@@ -364,7 +364,7 @@ export function createContextSearch(
       });
     },
 
-    preview(projectId: string, ref: ContextSourceRef): ContextSourcePreview {
+    readExcerpt(projectId: string, ref: ContextSourceRef) {
       return read(() => {
         const { contextId, path, sha256, chunk } = ref;
         const location = locateChunk.get(
@@ -376,7 +376,19 @@ export function createContextSearch(
         ) as Location | undefined;
         if (!location) throw new GitError("context_source_unavailable");
         const bytes = source(projectId, ref);
-        return { projectId, ...ref, ...excerpt(bytes, location) };
+        const { text, ...lines } = excerpt(bytes, location);
+        const { startByte, endByte } = location;
+        return {
+          preview: {
+            projectId,
+            ...ref,
+            ...lines,
+            text,
+          } satisfies ContextSourcePreview,
+          startByte,
+          endByte,
+          bytes: bytes.subarray(startByte, endByte),
+        };
       });
     },
   };

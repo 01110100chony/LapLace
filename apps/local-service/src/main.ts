@@ -12,10 +12,15 @@ import {
 import { GitError, inspectRepository } from "./git.ts";
 import { openCatalog } from "./catalog.ts";
 import { browseContext, captureContext } from "./context.ts";
+import { CodexQueries, prepareCodex } from "./codex.ts";
 
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 const exit = new AbortController();
-input.once("close", () => exit.abort());
+const codex = new CodexQueries();
+input.once("close", () => {
+  exit.abort();
+  codex.close();
+});
 const dataDir = process.argv[2] ?? "";
 const contextExclusions = (process.env.LAPLACE_CONTEXT_EXCLUDES ?? "")
   .split(";")
@@ -78,6 +83,35 @@ async function respond(line: string): Promise<Response> {
     }
     const project = withCatalog((store) => store.lookup(request.projectId));
     switch (request.operation) {
+      case "codex.status": {
+        const data = await codex.status(project.id);
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
+      case "codex.prepare": {
+        const material = withCatalog((store) =>
+          prepareCodex(store, request, dataDir),
+        );
+        return {
+          ...envelope,
+          operation: request.operation,
+          ok: true,
+          data: codex.prepare(material),
+        };
+      }
+      case "codex.start": {
+        if (exit.signal.aborted)
+          throw new GitError("codex_execution_unavailable");
+        const data = await codex.start(request);
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
+      case "codex.events": {
+        const data = codex.events(request);
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
+      case "codex.cancel": {
+        const data = codex.cancel(request);
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
       case "context.indexStatus": {
         const data = withCatalog((store) =>
           store.contextSearch.status(project.id, request.contextId),
@@ -102,13 +136,14 @@ async function respond(line: string): Promise<Response> {
       }
       case "context.sourcePreview": {
         const { contextId, path, sha256, chunk } = request;
-        const data = withCatalog((store) =>
-          store.contextSearch.preview(project.id, {
-            contextId,
-            path,
-            sha256,
-            chunk,
-          }),
+        const data = withCatalog(
+          (store) =>
+            store.contextSearch.readExcerpt(project.id, {
+              contextId,
+              path,
+              sha256,
+              chunk,
+            }).preview,
         );
         return { ...envelope, operation: request.operation, ok: true, data };
       }
