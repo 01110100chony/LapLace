@@ -1,6 +1,15 @@
 export const protocolVersion = 2;
 export const maxIpcBytes = 192 * 1024;
 
+export const cloneFailures = [
+  "clone_failed",
+  "clone_timeout",
+  "clone_destination_exists",
+  "clone_destination_changed",
+  "clone_registration_failed",
+  "clone_cleanup_pending",
+] as const;
+
 export const errorCodes = [
   "invalid_request",
   "invalid_folder",
@@ -43,6 +52,9 @@ export const errorCodes = [
   "working_unavailable",
   "working_conflict",
   "result_review_conflict",
+  "clone_unavailable",
+  "clone_busy",
+  ...cloneFailures,
 ] as const;
 
 export type ErrorCode = (typeof errorCodes)[number];
@@ -83,7 +95,8 @@ export type Results = ContextResults &
   TaskRunResults &
   TaskResultResults &
   WorkingResults &
-  ReviewResults & {
+  ReviewResults &
+  CloneResults & {
     health: Health;
     "workspace.list": Catalog;
     "workspace.addLocal": Project;
@@ -107,6 +120,7 @@ export type Request = Envelope &
     | TaskResultRequests
     | WorkingRequests
     | ReviewRequests
+    | CloneRequests
   );
 export type Response<K extends Operation = Operation> =
   | { [P in K]: Envelope & { operation: P; ok: true; data: Results[P] } }[K]
@@ -137,6 +151,8 @@ export function parseRequest(value: unknown): Request | undefined {
     return;
   }
   const envelope = { id: value.id, version: protocolVersion } as const;
+  const clone = parseCloneRequest(value);
+  if (clone) return { ...envelope, ...clone };
   const context = parseContextRequest(value);
   if (context) return { ...envelope, ...context };
   const codex = parseCodexRequest(value);
@@ -221,6 +237,10 @@ export function isGitObservation(value: unknown): value is GitObservation {
   );
 }
 
+export function isProject(value: unknown): value is Project {
+  return isProjectRecord(value) && isGitObservation(value);
+}
+
 function isCatalog(value: unknown): value is Catalog {
   if (!isRecord(value) || !Array.isArray(value.projects)) return false;
   const projects: unknown[] = value.projects;
@@ -247,6 +267,13 @@ export function isResponse<K extends Operation>(
   if (value.ok === false) return isIpcError(value.error);
   if (value.ok !== true || value.operation !== operation) return false;
   if (operation === "health") return isHealth(value.data);
+  if (
+    operation === "clone.prepare" ||
+    operation === "clone.start" ||
+    operation === "clone.status" ||
+    operation === "clone.cancel"
+  )
+    return isCloneResult(operation, value.data);
   if (operation === "workspace.list") return isCatalog(value.data);
   if (
     operation === "task.create" ||
@@ -351,3 +378,11 @@ import {
   type ReviewRequests,
   type ReviewResults,
 } from "./result-review.ts";
+
+import {
+  isCloneResult,
+  parseCloneRequest,
+  type CloneRequests,
+  type CloneResults,
+} from "./clone.ts";
+export * from "./clone.ts";

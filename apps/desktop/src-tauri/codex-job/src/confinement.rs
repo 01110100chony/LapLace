@@ -1,26 +1,23 @@
 //! Offline controls for the proposed Windows read boundary. The optional CLI
-//! diagnostic checks a staged executable's version without authentication.
+//! diagnostic checks a staged executable and an empty CODEX_HOME offline.
 
-use crate::{create_job, owned};
+use crate::{
+    create_job, owned,
+    win_process::{command_line, duplicate_inheritable, wide, Attributes},
+};
 use std::{
     env,
-    ffi::{c_void, OsStr},
+    ffi::c_void,
     fs,
     io::{self, Read},
-    os::windows::{
-        ffi::OsStrExt,
-        io::{AsRawHandle, OwnedHandle},
-    },
+    os::windows::{ffi::OsStrExt, fs::OpenOptionsExt, io::AsRawHandle},
     path::{Path, PathBuf},
     ptr, thread,
 };
 use windows_sys::{
     core::GUID,
     Win32::{
-        Foundation::{
-            DuplicateHandle, DUPLICATE_SAME_ACCESS, ERROR_ACCESS_DENIED, ERROR_SUCCESS, HANDLE,
-            INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
-        },
+        Foundation::{ERROR_ACCESS_DENIED, ERROR_SUCCESS, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT},
         Security::{
             Authorization::{
                 GetNamedSecurityInfoW, SetEntriesInAclW, SetNamedSecurityInfoW, EXPLICIT_ACCESS_W,
@@ -31,7 +28,10 @@ use windows_sys::{
             TokenIsAppContainer, WinBuiltinAnyPackageSid, DACL_SECURITY_INFORMATION, PSID,
             SECURITY_CAPABILITIES, SECURITY_MAX_SID_SIZE, TOKEN_QUERY,
         },
-        Storage::FileSystem::{FILE_GENERIC_EXECUTE, FILE_GENERIC_READ},
+        Storage::FileSystem::{
+            GetFinalPathNameByHandleW, FILE_FLAG_BACKUP_SEMANTICS, FILE_GENERIC_EXECUTE,
+            FILE_GENERIC_READ, FILE_NAME_OPENED, VOLUME_NAME_NT,
+        },
         System::{
             Com::CoCreateGuid,
             JobObjects::{
@@ -41,11 +41,9 @@ use windows_sys::{
             },
             SystemInformation::GetWindowsDirectoryW,
             Threading::{
-                CreateProcessW, DeleteProcThreadAttributeList, GetCurrentProcess,
-                GetExitCodeProcess, InitializeProcThreadAttributeList, OpenProcessToken,
-                ResumeThread, UpdateProcThreadAttribute, WaitForSingleObject, CREATE_NO_WINDOW,
-                CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT,
-                LPPROC_THREAD_ATTRIBUTE_LIST, PROCESS_INFORMATION,
+                CreateProcessW, GetExitCodeProcess, OpenProcessToken, ResumeThread,
+                WaitForSingleObject, CREATE_NO_WINDOW, CREATE_SUSPENDED,
+                CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT, PROCESS_INFORMATION,
                 PROC_THREAD_ATTRIBUTE_ALL_APPLICATION_PACKAGES_POLICY,
                 PROC_THREAD_ATTRIBUTE_HANDLE_LIST, PROC_THREAD_ATTRIBUTE_JOB_LIST,
                 PROC_THREAD_ATTRIBUTE_SECURITY_CAPABILITIES, STARTF_USESTDHANDLES, STARTUPINFOEXW,
@@ -59,10 +57,6 @@ const AUTHORIZED: &str = "authorized.txt";
 const CANARY: &str = "canary.txt";
 const AUTHORIZED_BYTES: &[u8] = b"laplace-authorized-fixture";
 const CANARY_BYTES: &[u8] = b"laplace-external-fixture";
-
-fn wide(value: impl AsRef<OsStr>) -> Vec<u16> {
-    value.as_ref().encode_wide().chain([0]).collect()
-}
 
 struct Scratch {
     path: PathBuf,
@@ -163,53 +157,6 @@ fn allow_read(path: &Path, sid: PSID, mask: u32) -> io::Result<()> {
             updated,
             ptr::null_mut(),
         ))
-    }
-}
-
-struct Attributes(Vec<usize>);
-
-impl Attributes {
-    fn new(count: u32) -> io::Result<Self> {
-        let mut bytes = 0;
-        unsafe { InitializeProcThreadAttributeList(ptr::null_mut(), count, 0, &mut bytes) };
-        if bytes == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let mut buffer = vec![0usize; bytes.div_ceil(size_of::<usize>())];
-        if unsafe {
-            InitializeProcThreadAttributeList(buffer.as_mut_ptr().cast(), count, 0, &mut bytes)
-        } == 0
-        {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(Self(buffer))
-    }
-
-    fn as_ptr(&mut self) -> LPPROC_THREAD_ATTRIBUTE_LIST {
-        self.0.as_mut_ptr().cast()
-    }
-
-    // `value` must live until the process has been created and this list deleted.
-    unsafe fn add<T>(&mut self, key: u32, value: &T) -> io::Result<()> {
-        if UpdateProcThreadAttribute(
-            self.as_ptr(),
-            0,
-            key as usize,
-            ptr::from_ref(value).cast(),
-            size_of::<T>(),
-            ptr::null_mut(),
-            ptr::null_mut(),
-        ) == 0
-        {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(())
-    }
-}
-
-impl Drop for Attributes {
-    fn drop(&mut self) {
-        unsafe { DeleteProcThreadAttributeList(self.as_ptr()) };
     }
 }
 
@@ -329,18 +276,23 @@ pub fn probe(cli: Option<&Path>) -> io::Result<()> {
         None
     };
     let memory_limit = if provider.is_some() { 768 } else { 64 } * 1024 * 1024;
-    let controls = launch(
+    let (controls, diagnostics) = capture(
         &executable,
         &allowed,
         &container,
         &["--laplace-codex-boundary-read"],
-        None,
         memory_limit,
     )?;
+    print!("{diagnostics}");
     match controls {
         0 => {}
         3 => return Err(io::Error::other("authorized fixture was unreadable")),
         4 => return Err(io::Error::other("external fixture was readable")),
+        6 => {
+            return Err(io::Error::other(
+                "CODEX_HOME is missing from the probe environment",
+            ))
+        }
         5 => {
             return Err(io::Error::other(
                 "external read returned a result other than access denied",
@@ -375,6 +327,32 @@ pub fn probe(cli: Option<&Path>) -> io::Result<()> {
             )));
         };
         println!("codex-cli {version}");
+        let (code, output) = capture(
+            &provider,
+            &allowed,
+            &container,
+            &[
+                "-c",
+                r#"cli_auth_credentials_store="file""#,
+                "login",
+                "status",
+            ],
+            memory_limit,
+        )?;
+        let status = if code == 1 && output.contains("failed to canonicalize CODEX_HOME") {
+            "CODEX_HOME canonicalization failed"
+        } else if code == 1
+            && output
+                .lines()
+                .any(|line| line.eq_ignore_ascii_case("Not logged in"))
+        {
+            "not logged in"
+        } else {
+            return Err(io::Error::other(format!(
+                "unexpected status for empty CODEX_HOME (0x{code:08x})"
+            )));
+        };
+        println!("Offline Codex login status: {status}");
     }
     Ok(())
 }
@@ -417,60 +395,6 @@ fn capture(
         .join()
         .map_err(|_| io::Error::other("diagnostic reader failed"))??;
     Ok((result?, output))
-}
-
-fn duplicate_inheritable(handle: HANDLE) -> io::Result<OwnedHandle> {
-    if handle.is_null() || handle == INVALID_HANDLE_VALUE {
-        return Err(io::Error::other("diagnostic stdio unavailable"));
-    }
-    let process = unsafe { GetCurrentProcess() };
-    let mut inheritable = ptr::null_mut();
-    if unsafe {
-        DuplicateHandle(
-            process,
-            handle,
-            process,
-            &mut inheritable,
-            0,
-            1,
-            DUPLICATE_SAME_ACCESS,
-        )
-    } == 0
-    {
-        return Err(io::Error::last_os_error());
-    }
-    owned(inheritable)
-}
-
-fn command_line(executable: &Path, args: &[&str]) -> Vec<u16> {
-    let mut command = Vec::new();
-    let quote = u16::from(b'"');
-    let slash = u16::from(b'\\');
-    for arg in std::iter::once(executable.as_os_str()).chain(args.iter().map(OsStr::new)) {
-        if !command.is_empty() {
-            command.push(u16::from(b' '));
-        }
-        command.push(quote);
-        let mut slashes = 0;
-        for unit in arg.encode_wide() {
-            if unit == slash {
-                slashes += 1;
-                continue;
-            }
-            let escaped = if unit == quote {
-                slashes * 2 + 1
-            } else {
-                slashes
-            };
-            command.extend(std::iter::repeat_n(slash, escaped));
-            command.push(unit);
-            slashes = 0;
-        }
-        command.extend(std::iter::repeat_n(slash, slashes * 2));
-        command.push(quote);
-    }
-    command.push(0);
-    command
 }
 
 fn launch(
@@ -579,12 +503,12 @@ fn launch(
             "could not resume the verified AppContainer",
         ));
     }
-    match unsafe { WaitForSingleObject(process.as_raw_handle(), 5_000) } {
+    match unsafe { WaitForSingleObject(process.as_raw_handle(), 20_000) } {
         WAIT_OBJECT_0 => {}
         WAIT_TIMEOUT => {
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
-                "controls timed out",
+                "LPAC child timed out",
             ))
         }
         _ => return Err(io::Error::last_os_error()),
@@ -602,13 +526,13 @@ fn verify_container(process: windows_sys::Win32::Foundation::HANDLE) -> io::Resu
         return Err(io::Error::last_os_error());
     }
     let token = owned(token)?;
-    let mut container = 0u32;
+    let mut enabled = 0u32;
     let mut bytes = 0;
     if unsafe {
         GetTokenInformation(
             token.as_raw_handle(),
             TokenIsAppContainer,
-            ptr::from_mut(&mut container).cast(),
+            ptr::from_mut(&mut enabled).cast(),
             size_of::<u32>() as u32,
             &mut bytes,
         )
@@ -616,13 +540,57 @@ fn verify_container(process: windows_sys::Win32::Foundation::HANDLE) -> io::Resu
     {
         return Err(io::Error::last_os_error());
     }
-    if container != 1 {
+    if enabled != 1 {
         return Err(io::Error::other("child token is not an AppContainer"));
     }
     Ok(())
 }
 
 pub fn read_controls() -> i32 {
+    let Some(home) = env::var_os("CODEX_HOME").map(PathBuf::from) else {
+        return 6;
+    };
+    eprintln!(
+        "CODEX_HOME metadata: {:?}",
+        fs::metadata(&home).map(|m| m.is_dir())
+    );
+    eprintln!(
+        "CODEX_HOME canonicalize: {:?}",
+        home.canonicalize().map(|_| ())
+    );
+    let opened = fs::OpenOptions::new()
+        .access_mode(0)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(&home);
+    match opened {
+        Err(error) => eprintln!("CODEX_HOME open: {error:?}"),
+        Ok(file) => {
+            for flags in [
+                0,
+                FILE_NAME_OPENED,
+                VOLUME_NAME_NT,
+                FILE_NAME_OPENED | VOLUME_NAME_NT,
+            ] {
+                let mut path = [0u16; 1024];
+                let count = unsafe {
+                    GetFinalPathNameByHandleW(
+                        file.as_raw_handle(),
+                        path.as_mut_ptr(),
+                        path.len() as u32,
+                        flags,
+                    )
+                };
+                if count == 0 {
+                    eprintln!(
+                        "CODEX_HOME GetFinalPathNameByHandleW({flags}): {:?}",
+                        io::Error::last_os_error()
+                    );
+                } else {
+                    eprintln!("CODEX_HOME GetFinalPathNameByHandleW({flags}): ok");
+                }
+            }
+        }
+    }
     if !matches!(fs::read(AUTHORIZED), Ok(bytes) if bytes == AUTHORIZED_BYTES) {
         return 3;
     }
@@ -630,27 +598,5 @@ pub fn read_controls() -> i32 {
         Err(error) if error.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) => 0,
         Ok(_) => 4,
         Err(_) => 5,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn windows_arguments_keep_spaces_quotes_and_trailing_slashes() {
-        let command = command_line(
-            Path::new(r"C:\folder name\codex.exe"),
-            &[
-                "-c",
-                r#"cli_auth_credentials_store="file""#,
-                r"C:\other folder\",
-            ],
-        );
-        assert_eq!(command.last(), Some(&0));
-        assert_eq!(
-            String::from_utf16(&command[..command.len() - 1]).unwrap(),
-            r#""C:\folder name\codex.exe" "-c" "cli_auth_credentials_store=\"file\"" "C:\other folder\\""#,
-        );
     }
 }

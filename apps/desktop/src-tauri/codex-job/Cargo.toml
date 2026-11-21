@@ -5,6 +5,9 @@ edition = "2021"
 rust-version = "1.90"
 publish = false
 
+[features]
+clone-only = []
+
 [dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",

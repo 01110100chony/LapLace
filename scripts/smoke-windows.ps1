@@ -72,10 +72,13 @@ New-Item -ItemType Directory -Path $catalog | Out-Null
 try {
     $install = Start-Process -FilePath $installer -ArgumentList "/S /D=$app" -WindowStyle Hidden -Wait -PassThru
     Assert-Smoke ($install.ExitCode -eq 0) "NSIS install returned $($install.ExitCode)."
-    foreach ($file in 'laplace.exe', 'laplace-node.exe', 'sidecar/service.cjs', 'licenses/NODE-LICENSE.txt', 'licenses/THIRD-PARTY-NOTICES.txt', 'uninstall.exe') {
+    foreach ($file in 'laplace.exe', 'laplace-node.exe', 'laplace-git-job.exe', 'sidecar/service.cjs', 'licenses/NODE-LICENSE.txt', 'licenses/THIRD-PARTY-NOTICES.txt', 'uninstall.exe') {
         Assert-Smoke (Test-Path -LiteralPath (Join-Path $app $file) -PathType Leaf) "Missing installed file $file."
     }
     Assert-Smoke (!(Test-Path -LiteralPath (Join-Path $app 'laplace-codex-job.exe'))) 'Development launcher was packaged.'
+
+    $gitJob = Start-Process -FilePath (Join-Path $app 'laplace-git-job.exe') -ArgumentList '--laplace-codex-boundary-probe' -WindowStyle Hidden -PassThru -Wait
+    Assert-Smoke ($gitJob.ExitCode -eq 126) 'Git launcher accepted a Codex diagnostic mode.'
 
     $repo = New-Item -ItemType Directory -Path (Join-Path $catalog 'Repo with spaces')
     $health, $empty, $missing = Invoke-Sidecar @(

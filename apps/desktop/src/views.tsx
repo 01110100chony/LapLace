@@ -26,6 +26,7 @@ type HomeProps = {
   recent: ProjectRecord | undefined;
   service: ServiceStatus;
   add: () => void;
+  clone: () => void;
   open: (project: ProjectRecord) => void;
   retryService: () => void;
 };
@@ -40,6 +41,7 @@ export function Home({
   recent,
   service,
   add,
+  clone,
   open,
   retryService,
 }: HomeProps) {
@@ -91,19 +93,28 @@ export function Home({
                 "Selecione uma pasta para consultar a branch, o HEAD e as alterações do Git."
               )}
             </p>
-            {recent ? (
-              <button className="button primary" onClick={() => open(recent)}>
-                Abrir projeto <span aria-hidden="true">→</span>
-              </button>
-            ) : (
+            <div className="workspace-actions">
+              {recent ? (
+                <button className="button primary" onClick={() => open(recent)}>
+                  Abrir projeto <span aria-hidden="true">→</span>
+                </button>
+              ) : (
+                <button
+                  className="button primary"
+                  disabled={service.state !== "ready"}
+                  onClick={add}
+                >
+                  <span aria-hidden="true">+</span> Adicionar projeto
+                </button>
+              )}
               <button
-                className="button primary"
+                className="button"
                 disabled={service.state !== "ready"}
-                onClick={add}
+                onClick={clone}
               >
-                <span aria-hidden="true">+</span> Adicionar projeto
+                Clonar do GitHub
               </button>
-            )}
+            </div>
           </section>
 
           <section className="projects" aria-labelledby="projects-heading">

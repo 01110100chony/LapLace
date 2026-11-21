@@ -264,9 +264,11 @@ Com o ambiente GNU configurado conforme o `AGENTS.md`, execute no PowerShell da 
 cargo run --locked --release --manifest-path apps/desktop/src-tauri/codex-job/Cargo.toml --target x86_64-pc-windows-gnu --target-dir apps/desktop/src-tauri/generated/codex-job -- --laplace-codex-boundary-probe
 ```
 
-A sonda cria dois arquivos fictícios e um perfil descartável de AppContainer de privilégio reduzido (LPAC). A conta que iniciou a sonda deve ler ambos. Em seguida, o mesmo processo LPAC deve ler a fonte autorizada e receber `ERROR_ACCESS_DENIED` ao abrir o canário externo, mesmo com a permissão de leitura do grupo `ALL APPLICATION PACKAGES` no canário. Falha de inicialização, arquivo ausente ou timeout fazem a sonda falhar. Opcionalmente, passe o caminho absoluto de um `codex.exe` após `--laplace-codex-boundary-probe` para executar `--version` sobre uma cópia da CLI no mesmo perfil offline.
+A sonda cria dois arquivos fictícios e um perfil descartável de AppContainer de privilégio reduzido (LPAC). A conta que inicia a sonda deve ler ambos. O processo LPAC deve ler a fonte autorizada e receber `ERROR_ACCESS_DENIED` ao abrir o canário externo, mesmo com a permissão de leitura do grupo `ALL APPLICATION PACKAGES` no canário. Falha de inicialização, arquivo ausente ou timeout fazem a sonda falhar. Passe o caminho absoluto de um `codex.exe` após `--laplace-codex-boundary-probe` para rodar `--version` e `login status` sobre uma cópia da CLI com um `CODEX_HOME` vazio, sem rede e sem credenciais.
 
-No Windows 10 x64 22H2 com GNU, a sonda retornou `LPAC: authorized read succeeded; external read denied`. Na execução com o binário instalado, o subprocesso também retornou `codex-cli 0.157.0`. O diagnóstico de `login status` no LPAC recebeu acesso negado ao resolver `CODEX_HOME`. O modo `verified_isolated` continua bloqueado até integrar uma fronteira à CLI e concluir uma consulta autenticada com dados fictícios sob a mesma política. A validação MSVC hospedada continua pendente.
+No Windows 10 x64 22H2 com GNU e Codex CLI 0.157.0, a fonte autorizada foi lida e o canário externo recebeu `ERROR_ACCESS_DENIED`. Dentro do mesmo perfil, os metadados e a abertura do diretório funcionaram. `GetFinalPathNameByHandleW` retornou erro 5 ao resolver o nome DOS (normalizado e aberto), enquanto o nome de volume NT foi resolvido. O resolvedor da CLI chama `canonicalize()` e falhou antes da leitura do estado de autenticação. [Código do resolvedor](https://github.com/openai/codex/blob/rust-v0.157.0/codex-rs/utils/home-dir/src/lib.rs)
+
+O modo `verified_isolated` permanece bloqueado. O aceite exige autenticação em um perfil dedicado, confirmação nativa do envio e uma resposta inspecionável com a fonte fictícia sob a mesma política que nega o acesso ao canário. [Fluxo de autenticação da CLI](https://developers.openai.com/codex/auth)
 
 A sonda original da CLI pode ser executada separadamente. Ela usa um `CODEX_HOME` descartável e dados fictícios.
 
@@ -311,14 +313,21 @@ A captura verifica se a base Git e os bytes selecionados continuam consistentes 
 
 Em uma execução concluída, **Aprovar diff** ou **Recusar diff** registra uma decisão vinculada ao digest do artefato de simulação e aos bytes preservados. A migração 10 conserva as decisões por revisão. A decisão reaparece após reiniciar. A aplicação de uma alteração real ao checkout continua pendente de um resultado confinado e de validação do mecanismo de aplicação e recuperação.
 
+## Clonar do GitHub
+
+Na Área de trabalho, escolha **Clonar do GitHub** e informe a URL HTTPS do repositório. O seletor nativo escolhe a pasta-pai e a confirmação exibe o endereço e a nova pasta antes de iniciar o Git. O clone usa o Git for Windows e o Git Credential Manager, quando disponível. Para um repositório privado, a credencial precisa estar disponível para o Git antes da operação.
+
+O Git baixa em uma pasta temporária sob a pasta confirmada. **Cancelar clone** encerra a árvore do Git e aguarda a saída antes de limpar esse estágio. Quando o download termina, o serviço verifica o checkout, publica a pasta sem substituir um destino existente e cadastra o projeto no catálogo local. Se o checkout já estiver no destino e o cadastro falhar, o caminho fica disponível para importação local.
+
 ## Estado do roadmap
 
-| Marco            | Entrega atual                                                               | Aceite pendente                                                                    |
-| ---------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| D01–D07, C01–C02 | Fundação desktop, catálogo, contexto preservado e busca FTS5                | —                                                                                  |
-| C03              | Modos de desenvolvimento, autorização, eventos JSONL e sonda LPAC offline   | Consulta real autenticada no perfil confinado                                      |
-| C04, O01         | Histórico e citações verificáveis. Tarefas diretas ou vinculadas à consulta | —                                                                                  |
-| O02–O03          | Supervisor persistente, cancelamento e diff reaberto offline em modo Mock   | Executar e inspecionar uma edição real em confinamento                             |
-| G01              | Captura e comparação de HEAD, índice e disco                                | —                                                                                  |
-| G02              | Evidência do diff simulado e decisão versionada                             | Revalidar base, aplicar com consentimento e reconciliar uma aplicação interrompida |
-| G03, M01, B01    | Planejados                                                                  | Clone GitHub, fila e worktrees, resumo e validação da beta em ambiente limpo       |
+| Marco            | Entrega atual                                                                      | Aceite pendente                                                                    |
+| ---------------- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| D01–D07, C01–C02 | Fundação desktop, catálogo, contexto preservado e busca FTS5                       | —                                                                                  |
+| C03              | Modos de desenvolvimento, autorização, JSONL e diagnóstico de `CODEX_HOME` no LPAC | Consulta real autenticada no perfil confinado                                      |
+| C04, O01         | Histórico e citações verificáveis. Tarefas diretas ou vinculadas à consulta        | —                                                                                  |
+| O02–O03          | Supervisor persistente, cancelamento e diff reaberto offline em modo Mock          | Executar e inspecionar uma edição real em confinamento                             |
+| G01              | Captura e comparação de HEAD, índice e disco                                       | —                                                                                  |
+| G02              | Evidência do diff simulado e decisão versionada                                    | Revalidar base, aplicar com consentimento e reconciliar uma aplicação interrompida |
+| G03              | Clone HTTPS real, cadastro e cancelamento verificados no sidecar GNU               | Validação do fluxo na janela Tauri e MSVC hospedado                                |
+| M01, B01         | Planejados                                                                         | Fila e worktrees, resumo e validação da beta em ambiente limpo                     |

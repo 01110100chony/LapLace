@@ -50,7 +50,7 @@ function isDenied(error: NodeJS.ErrnoException) {
   return error.code === "EACCES" || error.code === "EPERM";
 }
 
-async function folder(path: string): Promise<string> {
+export async function folder(path: string): Promise<string> {
   try {
     if (!isAbsolute(path)) throw new GitError("invalid_folder");
     const canonical = await canonicalPath(path);
@@ -65,7 +65,7 @@ async function folder(path: string): Promise<string> {
   }
 }
 
-async function gitOnPath(env: NodeJS.ProcessEnv): Promise<string> {
+export async function gitOnPath(env: NodeJS.ProcessEnv): Promise<string> {
   const pathValue = Object.entries(env).find(
     ([key]) => key.toUpperCase() === "PATH",
   )?.[1];
@@ -86,7 +86,7 @@ async function gitOnPath(env: NodeJS.ProcessEnv): Promise<string> {
   throw new GitError(denied ? "permission_denied" : "git_missing");
 }
 
-function gitEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+export function gitEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const environment = Object.fromEntries(
     Object.entries(source).filter(
       ([key]) => !/^git_/i.test(key) && key.toUpperCase() !== "LC_ALL",

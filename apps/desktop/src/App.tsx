@@ -5,6 +5,7 @@ import type {
   Project,
   ProjectRecord,
 } from "@laplace/contracts";
+import { CloneDialog } from "./CloneDialog";
 import { AppTitleBar } from "./AppTitleBar";
 import { ProjectFolderDialog } from "./ProjectFolderDialog";
 import { createDesktopClient, DesktopError, errorMessage } from "./ipc";
@@ -42,6 +43,7 @@ export function App() {
   const [recentId, setRecentId] = useState<string>();
   const [service, setService] = useState<ServiceStatus>({ state: "loading" });
   const [loader] = useState(() => createProjectLoader(desktop));
+  const cloneDialog = useRef<HTMLDialogElement>(null);
   const importDialog = useRef<HTMLDialogElement>(null);
   const relocateDialog = useRef<HTMLDialogElement>(null);
   const main = useRef<HTMLElement>(null);
@@ -214,12 +216,18 @@ export function App() {
               recent={recent}
               service={service}
               add={showImport}
+              clone={() => cloneDialog.current?.showModal()}
               open={openProject}
               retryService={() => void loadWorkspace()}
             />
           )}
         </main>
       </div>
+      <CloneDialog
+        dialogRef={cloneDialog}
+        client={desktop.clone}
+        onSelected={acceptProject}
+      />
       <ProjectFolderDialog
         dialogRef={importDialog}
         mode="import"

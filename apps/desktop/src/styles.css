@@ -1097,3 +1097,18 @@ h1 {
     text-align: center;
   }
 }
+
+.workspace-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.clone-progress {
+  display: block;
+  inline-size: 100%;
+}
+
+.clone-path {
+  overflow-wrap: anywhere;
+}

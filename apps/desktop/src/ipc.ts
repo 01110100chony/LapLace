@@ -24,6 +24,9 @@ type DesktopCommand =
   | "service_health"
   | "workspace_list"
   | "workspace_add_local"
+  | "clone_start"
+  | "clone_status"
+  | "clone_cancel"
   | "project_select"
   | "project_inspect"
   | "project_relocate"
@@ -39,8 +42,9 @@ type DesktopCommand =
   | "codex_request"
   | "task_request"
   | "working_request";
-type PickerOperation = "workspace.addLocal" | "project.relocate";
-type DesktopOperation = Exclude<Operation, "codex.approval">;
+type PickerOperation =
+  "workspace.addLocal" | "project.relocate" | "clone.start";
+type DesktopOperation = Exclude<Operation, "codex.approval" | "clone.prepare">;
 type InvokeArgs = Record<string, unknown>;
 type Invoke = (command: DesktopCommand, args: InvokeArgs) => Promise<unknown>;
 
@@ -48,6 +52,9 @@ const commands: Record<DesktopOperation, DesktopCommand> = {
   health: "service_health",
   "workspace.list": "workspace_list",
   "workspace.addLocal": "workspace_add_local",
+  "clone.start": "clone_start",
+  "clone.status": "clone_status",
+  "clone.cancel": "clone_cancel",
   "project.select": "project_select",
   "project.inspect": "project_inspect",
   "project.relocate": "project_relocate",
@@ -94,10 +101,10 @@ export class DesktopError extends Error {
 }
 
 export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
-  async function request(
-    operation: PickerOperation,
+  async function request<K extends PickerOperation>(
+    operation: K,
     args?: InvokeArgs,
-  ): Promise<Results[PickerOperation] | null>;
+  ): Promise<Results[K] | null>;
   async function request<K extends Exclude<DesktopOperation, PickerOperation>>(
     operation: K,
     args?: InvokeArgs,
@@ -108,7 +115,9 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
   ): Promise<Results[K] | null> {
     const id = crypto.randomUUID();
     const picker =
-      operation === "workspace.addLocal" || operation === "project.relocate";
+      operation === "workspace.addLocal" ||
+      operation === "project.relocate" ||
+      operation === "clone.start";
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const command = commands[operation];
@@ -152,6 +161,12 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
           response.data.contextId !== args.contextId)
       )
         throw new DesktopError("invalid_response");
+      if (
+        typeof args.cloneId === "string" &&
+        (!("cloneId" in response.data) ||
+          response.data.cloneId !== args.cloneId)
+      )
+        throw new DesktopError("invalid_response");
       return response.data;
     } catch (error) {
       if (error instanceof DesktopError) throw error;
@@ -167,6 +182,11 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
     health: () => request("health"),
     list: () => request("workspace.list"),
     addLocal: () => request("workspace.addLocal"),
+    clone: {
+      start: (url: string) => request("clone.start", { url }),
+      status: (cloneId: string) => request("clone.status", { cloneId }),
+      cancel: (cloneId: string) => request("clone.cancel", { cloneId }),
+    },
     select: (projectId: string) => request("project.select", { projectId }),
     inspect: (projectId: string) => request("project.inspect", { projectId }),
     relocate: (projectId: string) => request("project.relocate", { projectId }),
@@ -468,6 +488,19 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
 }
 
 const messages: Record<ErrorCode, string> = {
+  clone_unavailable:
+    "O clone está indisponível. Tente iniciar uma nova operação.",
+  clone_busy: "Aguarde ou cancele o clone em andamento.",
+  clone_failed:
+    "O Git não conseguiu clonar. Confira o endereço, a conexão e o acesso ao repositório.",
+  clone_timeout: "O clone excedeu o tempo limite.",
+  clone_destination_exists:
+    "Já existe uma pasta ou arquivo nesse destino. Escolha outra pasta-pai.",
+  clone_destination_changed:
+    "A pasta de destino mudou durante a operação. Selecione o destino novamente.",
+  clone_registration_failed:
+    "O clone foi baixado. Adicione a pasta ao catálogo pelo fluxo de projeto local.",
+  clone_cleanup_pending: "A limpeza da pasta temporária ficou pendente.",
   invalid_request: "A solicitação é inválida. Tente novamente.",
   invalid_folder:
     "A pasta não existe ou está inacessível. Escolha outra pasta.",

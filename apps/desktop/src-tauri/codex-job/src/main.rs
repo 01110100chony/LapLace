@@ -1,34 +1,44 @@
+#[cfg(not(feature = "clone-only"))]
 mod confinement;
+mod managed_clone;
+mod win_process;
 
 use std::{
-    ffi::{OsStr, OsString},
+    ffi::OsStr,
     io,
-    os::windows::{
-        io::{AsRawHandle, FromRawHandle, OwnedHandle},
-        process::CommandExt,
-    },
+    os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle},
     path::Path,
-    process::{self, Command, Stdio},
-    ptr, thread,
+    process, ptr,
+};
+#[cfg(not(feature = "clone-only"))]
+use std::{
+    ffi::OsString,
+    os::windows::process::CommandExt,
+    process::{Command, Stdio},
+    thread,
+};
+#[cfg(not(feature = "clone-only"))]
+use windows_sys::Win32::System::{
+    JobObjects::{
+        AssignProcessToJobObject, JOB_OBJECT_LIMIT_JOB_MEMORY, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    },
+    Threading::{
+        GetCurrentProcess, OpenProcess, WaitForSingleObject, CREATE_NO_WINDOW, INFINITE,
+        PROCESS_SYNCHRONIZE,
+    },
 };
 use windows_sys::Win32::{
     Foundation::HANDLE,
-    System::{
-        JobObjects::{
-            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-            JOB_OBJECT_LIMIT_JOB_MEMORY, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-        },
-        Threading::{
-            GetCurrentProcess, OpenProcess, WaitForSingleObject, CREATE_NO_WINDOW, INFINITE,
-            PROCESS_SYNCHRONIZE,
-        },
+    System::JobObjects::{
+        CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     },
 };
 
 fn main() {
     let mut args = std::env::args_os().skip(1);
     match args.next().as_deref() {
+        #[cfg(not(feature = "clone-only"))]
         Some(mode) if mode == OsStr::new("--laplace-codex-boundary-probe") => {
             let executable = args.next();
             if args.next().is_some() {
@@ -44,12 +54,30 @@ fn main() {
             }
             return;
         }
+        #[cfg(not(feature = "clone-only"))]
         Some(mode) if mode == OsStr::new("--laplace-codex-boundary-read") => {
             process::exit(confinement::read_controls());
         }
+        Some(mode) if mode == OsStr::new("--laplace-clone-job") => {
+            let pid = args.next().and_then(|value| value.to_str()?.parse().ok());
+            if let (Some(pid), Some(executable)) = (pid, args.next()) {
+                match managed_clone::run(pid, Path::new(&executable), args.collect()) {
+                    Ok(code) => process::exit(code),
+                    Err(error) => eprintln!("[laplace:clone] job_failed ({:?})", error.kind()),
+                }
+            }
+            process::exit(126);
+        }
+        #[cfg(not(feature = "clone-only"))]
         Some(mode) if mode == OsStr::new("--laplace-codex-job") => {}
-        _ => return,
+        _ => process::exit(126),
     }
+    #[cfg(not(feature = "clone-only"))]
+    run_codex_job(args);
+}
+
+#[cfg(not(feature = "clone-only"))]
+fn run_codex_job(mut args: impl Iterator<Item = OsString>) {
     let pid = args.next().and_then(|value| value.to_str()?.parse().ok());
     let executable = args.next();
     if let (Some(pid), Some(executable)) = (pid, executable) {
@@ -69,6 +97,7 @@ fn owned(handle: HANDLE) -> io::Result<OwnedHandle> {
     Ok(unsafe { OwnedHandle::from_raw_handle(handle) })
 }
 
+#[cfg(not(feature = "clone-only"))]
 fn run(pid: u32, executable: OsString, args: impl Iterator<Item = OsString>) -> io::Result<i32> {
     let parent = owned(unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) })?;
     let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();

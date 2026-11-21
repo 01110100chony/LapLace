@@ -14,6 +14,7 @@ import {
 import { GitError, inspectRepository } from "./git.ts";
 import { openCatalog } from "./catalog.ts";
 import { browseContext, captureContext } from "./context.ts";
+import { GitHubClones, runGitHubClone } from "./github-clone.ts";
 import { CodexQueries, prepareCodex, type CodexDevelopment } from "./codex.ts";
 import { TaskSupervisor } from "./task-supervisor.ts";
 import { captureWorkingTree, listWorkingTree } from "./working-tree.ts";
@@ -36,9 +37,17 @@ const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 const exit = new AbortController();
 const development =
   typeof __LAPLACE_DEVELOPMENT__ !== "undefined" && __LAPLACE_DEVELOPMENT__
-    ? developmentFromHost(process.argv.slice(3))
+    ? developmentFromHost(
+        process.argv.slice(isAbsolute(process.argv[3] ?? "") ? 4 : 3),
+      )
     : undefined;
 const codex = new CodexQueries({ development });
+const cloneHelper = process.argv[3];
+const clones = new GitHubClones(
+  cloneHelper && isAbsolute(cloneHelper)
+    ? runGitHubClone(cloneHelper)
+    : undefined,
+);
 const supervisor = new TaskSupervisor(
   development?.mode === "mock_development" ? development.scenario : undefined,
 );
@@ -46,6 +55,7 @@ input.once("close", () => {
   exit.abort();
   void codex.close();
   void supervisor.close();
+  void clones.close();
 });
 const dataDir = process.argv[2] ?? "";
 const contextExclusions = (process.env.LAPLACE_CONTEXT_EXCLUDES ?? "")
@@ -113,6 +123,29 @@ async function respond(line: string): Promise<Response> {
     }
     if (request.operation === "project.select") {
       const data = withCatalog((store) => store.select(request.projectId));
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "clone.prepare") {
+      if (exit.signal.aborted) throw new GitError("clone_unavailable");
+      const data = await clones.prepare(request.url, request.parent);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "clone.start") {
+      if (exit.signal.aborted) throw new GitError("clone_unavailable");
+      withCatalog(() => undefined);
+      const data = clones.start(request.grantId, (inspection) =>
+        withCatalog((store) => store.add(inspection)),
+      );
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (
+      request.operation === "clone.status" ||
+      request.operation === "clone.cancel"
+    ) {
+      const data =
+        request.operation === "clone.status"
+          ? clones.status(request.cloneId)
+          : clones.cancel(request.cloneId);
       return { ...envelope, operation: request.operation, ok: true, data };
     }
     const project = withCatalog((store) => store.lookup(request.projectId));
@@ -404,7 +437,7 @@ async function serve() {
 
 void serve()
   .finally(async () => {
-    await Promise.all([codex.close(), supervisor.close()]);
+    await Promise.all([codex.close(), supervisor.close(), clones.close()]);
     catalog?.close();
   })
   .catch(() => {

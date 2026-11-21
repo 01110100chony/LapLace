@@ -36,6 +36,98 @@ async fn workspace_add_local(
     ))
 }
 
+#[tauri::command]
+async fn clone_start(
+    id: String,
+    url: String,
+    window: WebviewWindow,
+    sidecar: State<'_, Sidecar>,
+) -> Result<Option<Response>, Fault> {
+    if !ipc::valid_id(&id) || url.len() > 180 {
+        return Err(ErrorCode::InvalidRequest.into());
+    }
+    let Some(parent) = choose_folder(&window, "Selecionar pasta de destino do clone").await? else {
+        return Ok(None);
+    };
+    let plan = sidecar
+        .request(
+            id.clone(),
+            Operation::ClonePrepare {
+                url: &url,
+                parent: &parent,
+            },
+        )
+        .await?
+        .clone_plan()?;
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    window
+        .dialog()
+        .message(format!(
+            "Repositório\n{}\n\nNova pasta\n{}",
+            plan.url, plan.destination
+        ))
+        .title("Confirmar destino do clone")
+        .parent(&window)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Clonar".into(),
+            "Cancelar".into(),
+        ))
+        .show(move |accepted| {
+            let _ = sender.send(accepted);
+        });
+    if !receiver.await.unwrap_or(false) {
+        return Ok(None);
+    }
+    Ok(Some(
+        sidecar
+            .request(
+                id,
+                Operation::CloneStart {
+                    grant_id: &plan.grant_id,
+                },
+            )
+            .await?,
+    ))
+}
+
+#[tauri::command]
+async fn clone_status(
+    id: String,
+    clone_id: String,
+    sidecar: State<'_, Sidecar>,
+) -> Result<Response, Fault> {
+    if !ipc::valid_id(&clone_id) {
+        return Err(ErrorCode::InvalidRequest.into());
+    }
+    Ok(sidecar
+        .request(
+            id,
+            Operation::CloneStatus {
+                clone_id: &clone_id,
+            },
+        )
+        .await?)
+}
+
+#[tauri::command]
+async fn clone_cancel(
+    id: String,
+    clone_id: String,
+    sidecar: State<'_, Sidecar>,
+) -> Result<Response, Fault> {
+    if !ipc::valid_id(&clone_id) {
+        return Err(ErrorCode::InvalidRequest.into());
+    }
+    Ok(sidecar
+        .request(
+            id,
+            Operation::CloneCancel {
+                clone_id: &clone_id,
+            },
+        )
+        .await?)
+}
+
 async fn choose_folder(window: &WebviewWindow, title: &str) -> Result<Option<String>, ErrorCode> {
     let (sender, receiver) = tokio::sync::oneshot::channel();
     window
@@ -419,6 +511,9 @@ fn main() {
             service_health,
             workspace_list,
             workspace_add_local,
+            clone_start,
+            clone_status,
+            clone_cancel,
             project_select,
             project_inspect,
             project_relocate,

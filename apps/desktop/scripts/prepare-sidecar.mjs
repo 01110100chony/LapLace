@@ -114,6 +114,32 @@ await build({
 });
 await prepareNotices(target, output);
 
+const jobManifest = fileURLToPath(
+  new URL("../src-tauri/codex-job/Cargo.toml", import.meta.url),
+);
+const jobTarget = join(output, "codex-job");
+function buildJob(features = []) {
+  execFileSync(
+    "cargo",
+    [
+      "build",
+      "--locked",
+      "--release",
+      "--manifest-path",
+      jobManifest,
+      "--target",
+      target,
+      "--target-dir",
+      jobTarget,
+      ...features,
+    ],
+    { stdio: "inherit" },
+  );
+}
+const builtJob = join(jobTarget, target, "release", "laplace-codex-job.exe");
+buildJob(["--features", "clone-only"]);
+await copyFile(builtJob, join(output, "laplace-git-job-" + target + ".exe"));
+
 if (development && process.env.LAPLACE_CODEX_DEV === "workspace") {
   const manifest = fileURLToPath(
     new URL("../src-tauri/Cargo.toml", import.meta.url),
@@ -132,34 +158,12 @@ if (development && process.env.LAPLACE_CODEX_DEV === "workspace") {
       { encoding: "utf8" },
     ),
   );
-  const jobManifest = fileURLToPath(
-    new URL("../src-tauri/codex-job/Cargo.toml", import.meta.url),
-  );
-  const jobTarget = join(output, "codex-job");
-  execFileSync(
-    "cargo",
-    [
-      "build",
-      "--locked",
-      "--release",
-      "--manifest-path",
-      jobManifest,
-      "--target",
-      target,
-      "--target-dir",
-      jobTarget,
-    ],
-    { stdio: "inherit" },
-  );
-  const helper = "laplace-codex-job.exe";
+  buildJob();
   for (const dir of [
     join(desktopTarget, target, "debug"),
     join(desktopTarget, "debug"),
   ]) {
     await mkdir(dir, { recursive: true });
-    await copyFile(
-      join(jobTarget, target, "release", helper),
-      join(dir, helper),
-    );
+    await copyFile(builtJob, join(dir, "laplace-codex-job.exe"));
   }
 }

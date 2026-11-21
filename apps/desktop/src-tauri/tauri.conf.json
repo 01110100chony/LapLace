@@ -30,7 +30,7 @@
   "bundle": {
     "active": false,
     "icon": ["icons/icon.ico"],
-    "externalBin": ["generated/laplace-node"],
+    "externalBin": ["generated/laplace-node", "generated/laplace-git-job"],
     "resources": {
       "generated/service.cjs": "sidecar/service.cjs",
       "generated/NODE-LICENSE.txt": "licenses/NODE-LICENSE.txt",

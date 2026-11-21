@@ -60,6 +60,10 @@ pub enum ErrorCode {
     WorkingUnavailable,
     WorkingConflict,
     ResultReviewConflict,
+    CloneUnavailable,
+    CloneBusy,
+    CloneDestinationExists,
+    CloneDestinationChanged,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -156,12 +160,36 @@ impl GitObservation {
 }
 
 #[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClonePlan {
+    pub grant_id: String,
+    pub url: String,
+    pub destination: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ClonePayload {
+    clone_id: String,
+    #[serde(flatten)]
+    data: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Deserialize, Serialize)]
 #[serde(tag = "operation", content = "data")]
 enum Payload {
     #[serde(rename = "health")]
     Health(Health),
     #[serde(rename = "workspace.list")]
     List(Catalog),
+    #[serde(rename = "clone.prepare")]
+    ClonePrepare(ClonePlan),
+    #[serde(rename = "clone.start")]
+    CloneStart(ClonePayload),
+    #[serde(rename = "clone.status")]
+    CloneStatus(ClonePayload),
+    #[serde(rename = "clone.cancel")]
+    CloneCancel(ClonePayload),
     #[serde(rename = "workspace.addLocal")]
     Add(Project),
     #[serde(rename = "project.select")]
@@ -242,6 +270,10 @@ impl Payload {
             Self::Health(_) => "health",
             Self::List(_) => "workspace.list",
             Self::Add(_) => "workspace.addLocal",
+            Self::ClonePrepare(_) => "clone.prepare",
+            Self::CloneStart(_) => "clone.start",
+            Self::CloneStatus(_) => "clone.status",
+            Self::CloneCancel(_) => "clone.cancel",
             Self::Select(_) => "project.select",
             Self::Inspect(_) => "project.inspect",
             Self::Relocate(_) => "project.relocate",
@@ -295,6 +327,14 @@ impl Payload {
             }
             Self::Add(project) | Self::Inspect(project) | Self::Relocate(project) => {
                 project.record.valid() && project.summary.valid()
+            }
+            Self::ClonePrepare(plan) => {
+                valid_id(&plan.grant_id)
+                    && plan.url.starts_with("https://github.com/")
+                    && std::path::Path::new(&plan.destination).is_absolute()
+            }
+            Self::CloneStart(data) | Self::CloneStatus(data) | Self::CloneCancel(data) => {
+                valid_id(&data.clone_id)
             }
             Self::ContextBrowse(data)
             | Self::ContextList(data)
@@ -363,6 +403,17 @@ pub struct Response {
 }
 
 impl Response {
+    pub fn clone_plan(self) -> Result<ClonePlan, ErrorCode> {
+        match self.body {
+            Body::Success {
+                payload: Payload::ClonePrepare(plan),
+                ..
+            } => Ok(plan),
+            Body::Failure { error, .. } => Err(error.code),
+            _ => Err(ErrorCode::InvalidResponse),
+        }
+    }
+
     pub fn codex_approval(self) -> Result<CodexApproval, ErrorCode> {
         match self.body {
             Body::Success {
@@ -456,6 +507,14 @@ pub enum Operation<'a> {
     Health,
     #[serde(rename = "workspace.list")]
     List,
+    #[serde(rename = "clone.prepare")]
+    ClonePrepare { url: &'a str, parent: &'a str },
+    #[serde(rename = "clone.start", rename_all = "camelCase")]
+    CloneStart { grant_id: &'a str },
+    #[serde(rename = "clone.status", rename_all = "camelCase")]
+    CloneStatus { clone_id: &'a str },
+    #[serde(rename = "clone.cancel", rename_all = "camelCase")]
+    CloneCancel { clone_id: &'a str },
     #[serde(rename = "workspace.addLocal")]
     Add { path: &'a str },
     #[serde(rename = "project.select")]
@@ -861,6 +920,10 @@ impl<'a> Operation<'a> {
             Self::Health => "health",
             Self::List => "workspace.list",
             Self::Add { .. } => "workspace.addLocal",
+            Self::ClonePrepare { .. } => "clone.prepare",
+            Self::CloneStart { .. } => "clone.start",
+            Self::CloneStatus { .. } => "clone.status",
+            Self::CloneCancel { .. } => "clone.cancel",
             Self::Select { .. } => "project.select",
             Self::Inspect { .. } => "project.inspect",
             Self::Relocate { .. } => "project.relocate",
@@ -994,12 +1057,14 @@ impl Sidecar {
     }
 
     fn spawn(&self) -> Result<Process, ErrorCode> {
+        let helper = self.runtime.with_file_name("laplace-git-job.exe");
         let mut command = Command::new(&self.runtime);
         command
             // Node's CommonJS resolver cannot canonicalize a Windows verbatim path.
             .arg("--preserve-symlinks-main")
             .arg(&self.script)
             .arg(&self.data_dir)
+            .arg(&helper)
             .env_remove("NODE_OPTIONS")
             .env_remove("NODE_PATH")
             .env_remove("NODE_V8_COVERAGE")
@@ -1020,10 +1085,9 @@ impl Sidecar {
                 );
             }
             Ok("workspace") => {
-                let helper = std::env::current_exe()
-                    .map_err(|_| ErrorCode::ServiceUnavailable)?
-                    .with_file_name("laplace-codex-job.exe");
-                command.arg("--codex-workspace").arg(helper);
+                command
+                    .arg("--codex-workspace")
+                    .arg(self.runtime.with_file_name("laplace-codex-job.exe"));
             }
             _ => {}
         }
