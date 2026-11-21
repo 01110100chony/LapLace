@@ -33,6 +33,16 @@ export const errorCodes = [
   "codex_unavailable",
   "codex_busy",
   "codex_execution_unavailable",
+  "task_unavailable",
+  "task_conflict",
+  "task_busy",
+  "task_runner_unavailable",
+  "task_execution_unavailable",
+  "task_result_unavailable",
+  "working_changed",
+  "working_unavailable",
+  "working_conflict",
+  "result_review_conflict",
 ] as const;
 
 export type ErrorCode = (typeof errorCodes)[number];
@@ -68,7 +78,12 @@ export type Catalog = {
 };
 
 export type Results = ContextResults &
-  CodexResults & {
+  CodexResults &
+  TaskResults &
+  TaskRunResults &
+  TaskResultResults &
+  WorkingResults &
+  ReviewResults & {
     health: Health;
     "workspace.list": Catalog;
     "workspace.addLocal": Project;
@@ -87,6 +102,11 @@ export type Request = Envelope &
     | { operation: "project.relocate"; projectId: string; path: string }
     | ContextRequests
     | CodexRequests
+    | TaskRequests
+    | TaskRunRequests
+    | TaskResultRequests
+    | WorkingRequests
+    | ReviewRequests
   );
 export type Response<K extends Operation = Operation> =
   | { [P in K]: Envelope & { operation: P; ok: true; data: Results[P] } }[K]
@@ -121,6 +141,16 @@ export function parseRequest(value: unknown): Request | undefined {
   if (context) return { ...envelope, ...context };
   const codex = parseCodexRequest(value);
   if (codex) return { ...envelope, ...codex };
+  const task = parseTaskRequest(value);
+  if (task) return { ...envelope, ...task };
+  const execution = parseTaskRunRequest(value);
+  if (execution) return { ...envelope, ...execution };
+  const result = parseTaskResultRequest(value);
+  if (result) return { ...envelope, ...result };
+  const working = parseWorkingRequest(value);
+  if (working) return { ...envelope, ...working };
+  const review = parseReviewRequest(value);
+  if (review) return { ...envelope, ...review };
   if (value.operation === "health") return { ...envelope, operation: "health" };
   if (value.operation === "workspace.list")
     return { ...envelope, operation: "workspace.list" };
@@ -219,12 +249,38 @@ export function isResponse<K extends Operation>(
   if (operation === "health") return isHealth(value.data);
   if (operation === "workspace.list") return isCatalog(value.data);
   if (
+    operation === "task.create" ||
+    operation === "task.update" ||
+    operation === "task.list"
+  )
+    return isTaskResult(operation, value.data);
+  if (
+    operation === "task.start" ||
+    operation === "execution.latest" ||
+    operation === "execution.events" ||
+    operation === "execution.cancel"
+  )
+    return isTaskRunResult(operation, value.data);
+  if (operation === "execution.result" || operation === "execution.change")
+    return isTaskResultResponse(operation, value.data);
+  if (
+    operation === "working.list" ||
+    operation === "working.latest" ||
+    operation === "working.capture" ||
+    operation === "working.compare"
+  )
+    return isWorkingResult(operation, value.data);
+  if (operation === "result.review" || operation === "result.reviewStatus")
+    return isReviewResult(operation, value.data);
+  if (
     operation === "codex.status" ||
     operation === "codex.prepare" ||
     operation === "codex.approval" ||
     operation === "codex.start" ||
     operation === "codex.events" ||
-    operation === "codex.cancel"
+    operation === "codex.cancel" ||
+    operation === "codex.history" ||
+    operation === "codex.citation"
   )
     return isCodexResult(operation, value.data);
   if (
@@ -254,9 +310,44 @@ import {
 export * from "./context.ts";
 export * from "./context-search.ts";
 export * from "./codex.ts";
+export * from "./tasks.ts";
+export * from "./task-execution.ts";
+export * from "./task-result.ts";
+export * from "./working-tree.ts";
+export * from "./result-review.ts";
 import {
   isCodexResult,
   parseCodexRequest,
   type CodexRequests,
   type CodexResults,
 } from "./codex.ts";
+import {
+  isTaskResult,
+  parseTaskRequest,
+  type TaskRequests,
+  type TaskResults,
+} from "./tasks.ts";
+import {
+  isTaskRunResult,
+  parseTaskRunRequest,
+  type TaskRunRequests,
+  type TaskRunResults,
+} from "./task-execution.ts";
+import {
+  isTaskResultResponse,
+  parseTaskResultRequest,
+  type TaskResultRequests,
+  type TaskResultResults,
+} from "./task-result.ts";
+import {
+  isWorkingResult,
+  parseWorkingRequest,
+  type WorkingRequests,
+  type WorkingResults,
+} from "./working-tree.ts";
+import {
+  isReviewResult,
+  parseReviewRequest,
+  type ReviewRequests,
+  type ReviewResults,
+} from "./result-review.ts";

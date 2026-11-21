@@ -119,6 +119,9 @@ try {
         @{ operation = 'context.index'; projectId = $id; contextId = $contextId; force = $false }
     ) $gitPath
     Assert-Smoke ($indexed.ok -and $indexed.data.files -eq 1 -and $indexed.data.chunks -eq 1) 'Installed sidecar could not index the capture.'
+    $working = Invoke-Sidecar @(@{ operation = 'working.capture'; projectId = $id; paths = @('untracked.txt') }) $gitPath
+    Assert-Smoke ($working.ok -and $working.data.head -eq $head -and
+        $working.data.files[0].disk.sha256 -eq $fileHash) 'Installed sidecar could not preserve the selected Git change.'
     Rename-Item -LiteralPath $repo.FullName -NewName 'Moved repo'
     $unavailable, $saved, $history, $context, $search, $preview, $codex = Invoke-Sidecar @(
         @{ operation = 'project.inspect'; projectId = $id },
@@ -140,14 +143,38 @@ try {
     Assert-Smoke ($codex.ok -and $codex.data.provider -eq 'openai' -and
         $codex.data.snapshotDigest -eq $capture.data.digest -and
         $codex.data.sources[0].sentSha256 -eq $fileHash) 'Installed sidecar failed to prepare the preserved Codex selection.'
-    $mode = Invoke-Sidecar @(@{ operation = 'codex.status'; projectId = $id }) -ForceWorkspaceDev
-    Assert-Smoke ($mode.ok -and $mode.data.mode -eq 'verified_isolated') 'Installed sidecar accepted development configuration.'
+    $workingLatest, $workingDiff = Invoke-Sidecar @(
+        @{ operation = 'working.latest'; projectId = $id },
+        @{ operation = 'working.compare'; projectId = $id; snapshotId = $working.data.snapshotId; path = 'untracked.txt'; layer = 'unstaged' }
+    )
+    Assert-Smoke ($workingLatest.ok -and $workingLatest.data.snapshot.digest -eq $working.data.digest -and
+        $workingDiff.ok -and $workingDiff.data.before.kind -eq 'absent' -and
+        $workingDiff.data.after.sha256 -eq $fileHash -and $workingDiff.data.afterText.Trim() -eq 'fixture') 'Preserved Git diff failed after the checkout moved.'
+    $mode, $codexHistory = Invoke-Sidecar @(
+        @{ operation = 'codex.status'; projectId = $id },
+        @{ operation = 'codex.history'; projectId = $id; contextId = $contextId; before = $null }
+    ) -ForceWorkspaceDev
+    Assert-Smoke ($mode.ok -and $mode.data.mode -eq 'verified_isolated' -and
+        $mode.data.state -eq 'confinement_unverified') 'Installed sidecar accepted development configuration or reported unverified confinement as ready.'
+    Assert-Smoke ($codexHistory.ok -and $codexHistory.data.contextId -eq $contextId -and
+        $codexHistory.data.items.Count -eq 0) 'Installed sidecar could not read the new Codex history.'
+    $task = Invoke-Sidecar @(@{
+        operation = 'task.create'; projectId = $id; taskId = 'smoke-draft';
+        title = 'Inspect the fixture'; objective = 'Read the preserved context'; source = $null
+    })
+    $tasks = Invoke-Sidecar @(@{ operation = 'task.list'; projectId = $id; before = $null })
+    Assert-Smoke ($task.ok -and $task.data.revision -eq 1 -and
+        $tasks.ok -and $tasks.data.items.Count -eq 1 -and
+        $tasks.data.items[0].taskId -eq $task.data.taskId) 'Installed sidecar could not restore the local task.'
+    $execution = Invoke-Sidecar @(@{ operation = 'execution.latest'; projectId = $id; taskId = $task.data.taskId }) -ForceWorkspaceDev
+    Assert-Smoke ($execution.ok -and $null -eq $execution.data.availableMode -and
+        $null -eq $execution.data.latest) 'Installed sidecar exposed a development-only task runner.'
 
     $db = Join-Path $data 'catalog.sqlite3'
     Assert-Smoke (Test-Path -LiteralPath $db -PathType Leaf) 'SQLite catalog was not created.'
     $sqlite = & $sidecar -e 'const {DatabaseSync} = require(''node:sqlite''); const db = new DatabaseSync(process.argv[1], { readOnly: true }); process.stdout.write(JSON.stringify({ version: process.versions.sqlite, journal: db.prepare(''PRAGMA journal_mode'').get().journal_mode, integrity: db.prepare(''PRAGMA integrity_check'').get().integrity_check })); db.close();' $db | ConvertFrom-Json
     Assert-Smoke ($LASTEXITCODE -eq 0 -and $sqlite.journal -eq 'delete' -and $sqlite.integrity -eq 'ok') 'Unexpected SQLite journal mode or integrity result.'
-    Write-Output "Smoke passed. Node.js $version, SQLite $($sqlite.version) ($($sqlite.journal)). IPC, Git, context capture, FTS5, Codex preview, restart, recovery and EOF verified."
+    Write-Output "Smoke passed. Node.js $version, SQLite $($sqlite.version) ($($sqlite.journal)). IPC, Git, preserved diff, context capture, FTS5, Codex history, local tasks, restart, recovery and EOF verified."
 } finally {
     if (Test-Path -LiteralPath $uninstaller -PathType Leaf) {
         $uninstall = Start-Process -FilePath $uninstaller -ArgumentList '/S' -WindowStyle Hidden -Wait -PassThru

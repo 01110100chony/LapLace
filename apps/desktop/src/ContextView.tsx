@@ -7,13 +7,14 @@ import {
   type ContextSnapshot,
   type ContextSourcePreview,
   type ContextStatus,
-  type OmissionReason,
+  type TaskSource,
 } from "@laplace/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type createDesktopClient, errorMessage } from "./ipc";
 import { createLatestRequest } from "./workspace";
 import { CodexQueryView } from "./CodexQueryView";
 import { ContextSearchView } from "./ContextSearchView";
+import { omissionLabels } from "./contextLabels";
 
 type Client = ReturnType<typeof createDesktopClient>["context"];
 type Load<T> =
@@ -35,21 +36,6 @@ const issues: Record<ContextIssue, string> = {
     "O estado do Git mudou ou deixou de estar disponível durante a captura.",
   timeout: "O tempo de leitura da captura se esgotou.",
   source_changed: "Uma fonte mudou durante a captura.",
-};
-const omissions: Record<OmissionReason, string> = {
-  excluded: "Excluído pela política de captura.",
-  sensitive_path: "Caminho sensível.",
-  linked_path: "Link ou redirecionamento de caminho.",
-  nested_project: "Pertence a outro checkout ou aos dados do aplicativo.",
-  not_file: "O caminho não indica um arquivo regular.",
-  missing: "O arquivo não estava disponível no início da leitura.",
-  unreadable: "O arquivo não pôde ser lido.",
-  too_large: "O arquivo excede o limite individual.",
-  total_limit: "O arquivo excederia o limite total de bytes.",
-  binary: "O arquivo é binário ou usa outra codificação.",
-  changed: "O arquivo mudou ou foi removido durante a leitura.",
-  duplicate_path: "A seleção já contém esse arquivo.",
-  capture_invalidated: "Os bytes foram descartados com a captura.",
 };
 
 function ContextTime({ value }: { value: string }) {
@@ -127,11 +113,13 @@ export function ContextView({
   projectName,
   client,
   codex,
+  onCreateTask,
 }: {
   projectId: string;
   projectName: string;
   client: Client;
   codex: ReturnType<typeof createDesktopClient>["codex"];
+  onCreateTask: (source: TaskSource, question: string) => void;
 }) {
   const [browse, setBrowse] = useState<Load<ContextBrowse>>({
     state: "loading",
@@ -293,6 +281,7 @@ export function ContextView({
         projectId={projectId}
         projectName={projectName}
         client={codex}
+        onCreateTask={onCreateTask}
         snapshot={snapshot}
         excerpts={excerpts}
       />
@@ -551,7 +540,7 @@ export function ContextView({
                   </code>
                 </strong>
                 {entry.outcome === "omitted" ? (
-                  <p>Omitido · {omissions[entry.reason]}</p>
+                  <p>Omitido · {omissionLabels[entry.reason]}</p>
                 ) : (
                   <>
                     <p>

@@ -203,6 +203,9 @@ export function App() {
               relocate={() => relocateDialog.current?.showModal()}
               contextClient={desktop.context}
               codexClient={desktop.codex}
+              taskClient={desktop.task}
+              executionClient={desktop.execution}
+              workingClient={desktop.working}
             />
           ) : (
             <Home

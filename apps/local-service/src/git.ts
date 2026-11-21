@@ -1,4 +1,5 @@
 import { constants, realpath } from "node:fs";
+import { createHash } from "node:crypto";
 import { access, stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { basename, delimiter, isAbsolute, join } from "node:path";
@@ -6,10 +7,12 @@ import { promisify } from "node:util";
 import {
   gitSource,
   gitSummaryVersion,
+  isGitObjectId,
   type ErrorCode,
   type GitObservation,
   type GitSummary,
   type ProjectRecord,
+  type WorkingChange,
 } from "@laplace/contracts";
 
 const exec = promisify(execFile);
@@ -100,7 +103,10 @@ function gitEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   };
 }
 
-function parseStatus(text: string): Omit<GitSummary, "observedAt"> {
+function parseStatus(
+  text: string,
+  observeChange?: (change: WorkingChange) => void,
+): Omit<GitSummary, "observedAt"> {
   const records = text.split("\0");
   if (records.pop() !== "") throw new GitError("git_failed");
   let branch: string | null | undefined;
@@ -124,12 +130,48 @@ function parseStatus(text: string): Omit<GitSummary, "observedAt"> {
     } else if (/^[12] [A-Z.]{2} /.test(record)) {
       if (record[2] !== ".") changes.staged++;
       if (record[3] !== ".") changes.unstaged++;
-      if (record[0] === "2" && !records[++index])
-        throw new GitError("git_failed");
+      const from = record[0] === "2" ? records[++index] : null;
+      if (from === undefined || from === "") throw new GitError("git_failed");
+      if (observeChange) {
+        const fields = record.split(" ", from === null ? 8 : 9);
+        const path = record.slice(fields.join(" ").length + 1);
+        if (!path || !fields[2]) throw new GitError("git_failed");
+        observeChange({
+          path,
+          from,
+          status: fields[1]!,
+          kind: from === null ? "tracked" : "renamed",
+          submodule: fields[2][0] === "S",
+          untracked: false,
+        });
+      }
     } else if (record.startsWith("u ")) {
       changes.conflicted++;
+      if (observeChange) {
+        const fields = record.split(" ", 10);
+        const path = record.slice(fields.join(" ").length + 1);
+        if (!path || !fields[2]) throw new GitError("git_failed");
+        observeChange({
+          path,
+          from: null,
+          status: fields[1]!,
+          kind: "conflicted",
+          submodule: fields[2][0] === "S",
+          untracked: false,
+        });
+      }
     } else if (record.startsWith("? ")) {
       changes.untracked++;
+      const path = record.slice(2);
+      if (path)
+        observeChange?.({
+          path,
+          from: null,
+          status: "??",
+          kind: "untracked",
+          submodule: false,
+          untracked: true,
+        });
     } else {
       throw new GitError("git_failed");
     }
@@ -149,21 +191,23 @@ async function repositoryReader(path: string, options: GitOptions) {
   const git = await gitOnPath(sourceEnv);
   const env = gitEnvironment(sourceEnv);
 
-  async function run(
+  async function runBytes(
     cwd: string,
     args: string[],
     {
       noMatchIsEmpty = false,
       overrides = {},
       maxBuffer = 16 * 1024 * 1024,
+      input,
     }: {
       noMatchIsEmpty?: boolean;
       overrides?: NodeJS.ProcessEnv;
       maxBuffer?: number;
+      input?: string;
     } = {},
-  ): Promise<string> {
+  ): Promise<Buffer> {
     try {
-      const { stdout } = await exec(
+      const child = exec(
         git,
         [
           "--no-optional-locks",
@@ -183,16 +227,22 @@ async function repositoryReader(path: string, options: GitOptions) {
           signal,
           windowsHide: true,
           maxBuffer,
+          encoding: "buffer",
         },
       );
+      if (input !== undefined) {
+        child.child.stdin?.on("error", () => undefined);
+        child.child.stdin?.end(input);
+      }
+      const { stdout } = await child;
       return stdout;
     } catch (error) {
-      const failure = error as NodeJS.ErrnoException & { stderr?: string };
+      const failure = error as NodeJS.ErrnoException & { stderr?: Buffer };
       if (signal.aborted) throw new GitError("git_timeout");
       if (isMissing(failure)) throw new GitError("git_missing");
-      if (noMatchIsEmpty && Number(failure.code) === 1 && !failure.stderr)
-        return "";
-      const stderr = failure.stderr ?? "";
+      const stderr = failure.stderr?.toString("utf8") ?? "";
+      if (noMatchIsEmpty && Number(failure.code) === 1 && !stderr)
+        return Buffer.alloc(0);
       if (
         isDenied(failure) ||
         /permission denied|access is denied|dubious ownership/i.test(stderr)
@@ -207,6 +257,14 @@ async function repositoryReader(path: string, options: GitOptions) {
       }
       throw new GitError("git_failed");
     }
+  }
+
+  async function run(
+    cwd: string,
+    args: string[],
+    config?: Parameters<typeof runBytes>[2],
+  ) {
+    return (await runBytes(cwd, args, config)).toString("utf8");
   }
 
   const topLevel = await run(selected, ["rev-parse", "--show-toplevel"]);
@@ -245,15 +303,13 @@ async function repositoryReader(path: string, options: GitOptions) {
     }
   }
 
-  return { root, run, checkoutLocation };
+  return { root, run, runBytes, checkoutLocation };
 }
 
-export async function inspectRepository(
-  path: string,
-  options: GitOptions = {},
-): Promise<RepositoryInspection> {
-  const { root, run, checkoutLocation } = await repositoryReader(path, options);
-  const { identity } = await checkoutLocation();
+async function checkoutStatus(
+  { root, run }: Awaited<ReturnType<typeof repositoryReader>>,
+  observeChange?: (change: WorkingChange) => void,
+) {
   // Status may invoke configured clean/process filters when stat checks miss.
   const filters = await run(
     root,
@@ -277,7 +333,7 @@ export async function inspectRepository(
       ? "false"
       : "";
   }
-  const status = parseStatus(
+  return parseStatus(
     await run(
       root,
       [
@@ -291,7 +347,18 @@ export async function inspectRepository(
       ],
       { overrides },
     ),
+    observeChange,
   );
+}
+
+export async function inspectRepository(
+  path: string,
+  options: GitOptions = {},
+): Promise<RepositoryInspection> {
+  const repo = await repositoryReader(path, options);
+  const { root, checkoutLocation } = repo;
+  const { identity } = await checkoutLocation();
+  const status = await checkoutStatus(repo);
   if ((await checkoutLocation()).identity !== identity)
     throw new GitError("project_identity_mismatch");
   return {
@@ -306,7 +373,8 @@ export async function inspectRepository(
 }
 
 export async function contextCheckout(path: string, options: GitOptions) {
-  const { root, run, checkoutLocation } = await repositoryReader(path, options);
+  const repo = await repositoryReader(path, options);
+  const { root, run, runBytes, checkoutLocation } = repo;
   const { gitDir, identity } = await checkoutLocation();
   return {
     root,
@@ -347,6 +415,93 @@ export async function contextCheckout(path: string, options: GitOptions) {
           maxBuffer: 256 * 1024,
         },
       );
+    },
+    status(observeChange: (change: WorkingChange) => void) {
+      return checkoutStatus(repo, observeChange);
+    },
+    treeEntries(head: string, paths: string[]) {
+      if (!isGitObjectId(head) || !paths.length)
+        throw new GitError("git_failed");
+      return run(
+        root,
+        [
+          "--literal-pathspecs",
+          "ls-tree",
+          "-z",
+          "--full-tree",
+          head,
+          "--",
+          ...paths,
+        ],
+        { maxBuffer: 64 * 1024 },
+      );
+    },
+    async blobs(oids: string[], maxFileBytes: number) {
+      const unique = [...new Set(oids)];
+      const blobs = new Map<
+        string,
+        { size: number | null; bytes: Buffer | null }
+      >();
+      if (!unique.length) return blobs;
+      if (!unique.every(isGitObjectId)) throw new GitError("git_failed");
+      const input = (ids: string[]) => `${ids.join("\n")}\n`;
+      const descriptions = (
+        await run(root, ["cat-file", "--batch-check"], {
+          input: input(unique),
+          maxBuffer: unique.length * 128,
+        })
+      )
+        .trimEnd()
+        .split(/\r?\n/);
+      if (descriptions.length !== unique.length)
+        throw new GitError("git_failed");
+      const readable: string[] = [];
+      let budget = 0;
+      for (const [i, oid] of unique.entries()) {
+        const [id, type, length] = descriptions[i]!.split(" ");
+        const size = type === "missing" ? null : Number(length);
+        if (
+          id !== oid ||
+          (type !== "missing" &&
+            (type !== "blob" || !Number.isSafeInteger(size) || size! < 0))
+        )
+          throw new GitError("git_failed");
+        blobs.set(oid, { size, bytes: null });
+        if (size !== null && size <= maxFileBytes) {
+          readable.push(oid);
+          budget += size + 128;
+        }
+      }
+      if (!readable.length) return blobs;
+      const contents = await runBytes(root, ["cat-file", "--batch"], {
+        input: input(readable),
+        maxBuffer: budget,
+      });
+      let offset = 0;
+      for (const oid of readable) {
+        const entry = blobs.get(oid)!;
+        const size = entry.size!;
+        const end = contents.indexOf(10, offset);
+        const header = contents.toString("ascii", offset, end);
+        const bytes = contents.subarray(end + 1, end + 1 + size);
+        const digest = createHash(oid.length === 40 ? "sha1" : "sha256")
+          .update(`blob ${size}\0`)
+          .update(bytes)
+          .digest("hex");
+        offset = end + 1 + size;
+        if (
+          end < 0 ||
+          header !== `${oid} blob ${size}` ||
+          bytes.length !== size ||
+          digest !== oid ||
+          contents[offset] !== 10
+        )
+          throw new GitError("git_failed");
+        offset++;
+        entry.bytes = bytes;
+      }
+      if (offset !== contents.length) throw new GitError("git_failed");
+      return blobs;
     },
   };
 }

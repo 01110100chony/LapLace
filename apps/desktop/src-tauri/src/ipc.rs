@@ -50,6 +50,16 @@ pub enum ErrorCode {
     CodexUnavailable,
     CodexBusy,
     CodexExecutionUnavailable,
+    TaskUnavailable,
+    TaskConflict,
+    TaskBusy,
+    TaskRunnerUnavailable,
+    TaskExecutionUnavailable,
+    TaskResultUnavailable,
+    WorkingChanged,
+    WorkingUnavailable,
+    WorkingConflict,
+    ResultReviewConflict,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -190,6 +200,40 @@ enum Payload {
     CodexEvents(ContextPayload),
     #[serde(rename = "codex.cancel")]
     CodexCancel(ContextPayload),
+    #[serde(rename = "codex.history")]
+    CodexHistory(ContextPayload),
+    #[serde(rename = "codex.citation")]
+    CodexCitation(ContextPayload),
+    #[serde(rename = "task.list")]
+    TaskList(ContextPayload),
+    #[serde(rename = "task.create")]
+    TaskCreate(ContextPayload),
+    #[serde(rename = "task.update")]
+    TaskUpdate(ContextPayload),
+    #[serde(rename = "task.start")]
+    TaskStart(ContextPayload),
+    #[serde(rename = "execution.latest")]
+    ExecutionLatest(ContextPayload),
+    #[serde(rename = "execution.events")]
+    ExecutionEvents(ContextPayload),
+    #[serde(rename = "execution.cancel")]
+    ExecutionCancel(ContextPayload),
+    #[serde(rename = "execution.result")]
+    ExecutionResult(ContextPayload),
+    #[serde(rename = "execution.change")]
+    ExecutionChange(ContextPayload),
+    #[serde(rename = "working.list")]
+    WorkingList(ContextPayload),
+    #[serde(rename = "working.latest")]
+    WorkingLatest(ContextPayload),
+    #[serde(rename = "working.capture")]
+    WorkingCapture(ContextPayload),
+    #[serde(rename = "working.compare")]
+    WorkingCompare(ContextPayload),
+    #[serde(rename = "result.reviewStatus")]
+    ResultReviewStatus(ContextPayload),
+    #[serde(rename = "result.review")]
+    ResultReview(ContextPayload),
 }
 
 impl Payload {
@@ -216,6 +260,23 @@ impl Payload {
             Self::CodexStart(_) => "codex.start",
             Self::CodexEvents(_) => "codex.events",
             Self::CodexCancel(_) => "codex.cancel",
+            Self::CodexHistory(_) => "codex.history",
+            Self::CodexCitation(_) => "codex.citation",
+            Self::TaskList(_) => "task.list",
+            Self::TaskCreate(_) => "task.create",
+            Self::TaskUpdate(_) => "task.update",
+            Self::TaskStart(_) => "task.start",
+            Self::ExecutionLatest(_) => "execution.latest",
+            Self::ExecutionEvents(_) => "execution.events",
+            Self::ExecutionCancel(_) => "execution.cancel",
+            Self::ExecutionResult(_) => "execution.result",
+            Self::ExecutionChange(_) => "execution.change",
+            Self::WorkingList(_) => "working.list",
+            Self::WorkingLatest(_) => "working.latest",
+            Self::WorkingCapture(_) => "working.capture",
+            Self::WorkingCompare(_) => "working.compare",
+            Self::ResultReviewStatus(_) => "result.reviewStatus",
+            Self::ResultReview(_) => "result.review",
         }
     }
 
@@ -235,7 +296,24 @@ impl Payload {
             Self::Add(project) | Self::Inspect(project) | Self::Relocate(project) => {
                 project.record.valid() && project.summary.valid()
             }
-            Self::ContextBrowse(data) | Self::ContextList(data) | Self::CodexStatus(data) => {
+            Self::ContextBrowse(data)
+            | Self::ContextList(data)
+            | Self::CodexStatus(data)
+            | Self::TaskList(data)
+            | Self::TaskCreate(data)
+            | Self::TaskUpdate(data)
+            | Self::TaskStart(data)
+            | Self::ExecutionLatest(data)
+            | Self::ExecutionEvents(data)
+            | Self::ExecutionCancel(data)
+            | Self::ExecutionResult(data)
+            | Self::ExecutionChange(data)
+            | Self::WorkingList(data)
+            | Self::WorkingLatest(data)
+            | Self::WorkingCapture(data)
+            | Self::WorkingCompare(data)
+            | Self::ResultReviewStatus(data)
+            | Self::ResultReview(data) => {
                 valid_project_id(&data.project_id) && data.context_id.is_none()
             }
             Self::ContextSearch(data) => {
@@ -252,7 +330,9 @@ impl Payload {
             | Self::CodexApproval(data)
             | Self::CodexStart(data)
             | Self::CodexEvents(data)
-            | Self::CodexCancel(data) => {
+            | Self::CodexCancel(data)
+            | Self::CodexHistory(data)
+            | Self::CodexCitation(data) => {
                 valid_project_id(&data.project_id)
                     && data.context_id.as_deref().is_some_and(valid_project_id)
             }
@@ -321,7 +401,24 @@ impl Response {
                             | Payload::CodexApproval(data)
                             | Payload::CodexStart(data)
                             | Payload::CodexEvents(data)
-                            | Payload::CodexCancel(data) => {
+                            | Payload::CodexCancel(data)
+                            | Payload::CodexHistory(data)
+                            | Payload::CodexCitation(data)
+                            | Payload::TaskList(data)
+                            | Payload::TaskCreate(data)
+                            | Payload::TaskUpdate(data)
+                            | Payload::TaskStart(data)
+                            | Payload::ExecutionLatest(data)
+                            | Payload::ExecutionEvents(data)
+                            | Payload::ExecutionCancel(data)
+                            | Payload::ExecutionResult(data)
+                            | Payload::ExecutionChange(data)
+                            | Payload::WorkingList(data)
+                            | Payload::WorkingLatest(data)
+                            | Payload::WorkingCapture(data)
+                            | Payload::WorkingCompare(data)
+                            | Payload::ResultReviewStatus(data)
+                            | Payload::ResultReview(data) => {
                                 data.project_id == id
                                     && operation.snapshot_id().is_none_or(|context_id| {
                                         data.context_id.as_deref() == Some(context_id)
@@ -432,6 +529,10 @@ pub enum Operation<'a> {
     },
     #[serde(untagged)]
     Codex(&'a CodexRequest),
+    #[serde(untagged)]
+    Task(&'a TaskRequest),
+    #[serde(untagged)]
+    Working(&'a WorkingRequest),
 }
 
 #[derive(Deserialize, Serialize)]
@@ -517,6 +618,19 @@ pub enum CodexRequest {
         context_id: String,
         execution_id: String,
     },
+    #[serde(rename = "codex.history")]
+    History {
+        project_id: String,
+        context_id: String,
+        before: Option<String>,
+    },
+    #[serde(rename = "codex.citation")]
+    Citation {
+        project_id: String,
+        context_id: String,
+        execution_id: String,
+        source_id: String,
+    },
 }
 
 impl CodexRequest {
@@ -528,6 +642,8 @@ impl CodexRequest {
             Self::Start { .. } => "codex.start",
             Self::Events { .. } => "codex.events",
             Self::Cancel { .. } => "codex.cancel",
+            Self::History { .. } => "codex.history",
+            Self::Citation { .. } => "codex.citation",
         }
     }
 
@@ -538,7 +654,9 @@ impl CodexRequest {
             | Self::Approval { project_id, .. }
             | Self::Start { project_id, .. }
             | Self::Events { project_id, .. }
-            | Self::Cancel { project_id, .. } => project_id,
+            | Self::Cancel { project_id, .. }
+            | Self::History { project_id, .. }
+            | Self::Citation { project_id, .. } => project_id,
         }
     }
 
@@ -549,7 +667,190 @@ impl CodexRequest {
             | Self::Approval { context_id, .. }
             | Self::Start { context_id, .. }
             | Self::Events { context_id, .. }
-            | Self::Cancel { context_id, .. } => Some(context_id),
+            | Self::Cancel { context_id, .. }
+            | Self::History { context_id, .. }
+            | Self::Citation { context_id, .. } => Some(context_id),
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TaskSource {
+    context_id: String,
+    execution_id: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(
+    tag = "operation",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum TaskRequest {
+    #[serde(rename = "task.list")]
+    List {
+        project_id: String,
+        before: Option<String>,
+    },
+    #[serde(rename = "task.create")]
+    Create {
+        project_id: String,
+        task_id: String,
+        title: String,
+        objective: String,
+        source: Option<TaskSource>,
+    },
+    #[serde(rename = "task.update")]
+    Update {
+        project_id: String,
+        task_id: String,
+        title: String,
+        objective: String,
+        expected_revision: u64,
+    },
+    #[serde(rename = "task.start")]
+    Start {
+        project_id: String,
+        task_id: String,
+        request_id: String,
+        expected_revision: u64,
+    },
+    #[serde(rename = "execution.latest")]
+    Latest { project_id: String, task_id: String },
+    #[serde(rename = "execution.events")]
+    Events {
+        project_id: String,
+        task_id: String,
+        execution_id: String,
+        after_seq: u32,
+    },
+    #[serde(rename = "execution.cancel")]
+    Cancel {
+        project_id: String,
+        task_id: String,
+        execution_id: String,
+    },
+    #[serde(rename = "execution.result")]
+    Result {
+        project_id: String,
+        task_id: String,
+        execution_id: String,
+    },
+    #[serde(rename = "execution.change")]
+    Change {
+        project_id: String,
+        task_id: String,
+        execution_id: String,
+        path: String,
+    },
+    #[serde(rename = "result.reviewStatus")]
+    ReviewStatus {
+        project_id: String,
+        task_id: String,
+        execution_id: String,
+    },
+    #[serde(rename = "result.review")]
+    Review {
+        project_id: String,
+        task_id: String,
+        execution_id: String,
+        request_id: String,
+        expected_base: String,
+        expected_revision: u64,
+        choice: ReviewChoice,
+    },
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ReviewChoice {
+    Approved,
+    Rejected,
+}
+
+impl TaskRequest {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::List { .. } => "task.list",
+            Self::Create { .. } => "task.create",
+            Self::Update { .. } => "task.update",
+            Self::Start { .. } => "task.start",
+            Self::Latest { .. } => "execution.latest",
+            Self::Events { .. } => "execution.events",
+            Self::Cancel { .. } => "execution.cancel",
+            Self::Result { .. } => "execution.result",
+            Self::Change { .. } => "execution.change",
+            Self::ReviewStatus { .. } => "result.reviewStatus",
+            Self::Review { .. } => "result.review",
+        }
+    }
+
+    fn project_id(&self) -> &str {
+        match self {
+            Self::List { project_id, .. }
+            | Self::Create { project_id, .. }
+            | Self::Update { project_id, .. }
+            | Self::Start { project_id, .. }
+            | Self::Latest { project_id, .. }
+            | Self::Events { project_id, .. }
+            | Self::Cancel { project_id, .. }
+            | Self::Result { project_id, .. }
+            | Self::Change { project_id, .. }
+            | Self::ReviewStatus { project_id, .. }
+            | Self::Review { project_id, .. } => project_id,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WorkingLayer {
+    Staged,
+    Unstaged,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(
+    tag = "operation",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum WorkingRequest {
+    #[serde(rename = "working.list")]
+    List { project_id: String },
+    #[serde(rename = "working.latest")]
+    Latest { project_id: String },
+    #[serde(rename = "working.capture")]
+    Capture {
+        project_id: String,
+        paths: Vec<String>,
+    },
+    #[serde(rename = "working.compare")]
+    Compare {
+        project_id: String,
+        snapshot_id: String,
+        path: String,
+        layer: WorkingLayer,
+    },
+}
+
+impl WorkingRequest {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::List { .. } => "working.list",
+            Self::Latest { .. } => "working.latest",
+            Self::Capture { .. } => "working.capture",
+            Self::Compare { .. } => "working.compare",
+        }
+    }
+
+    fn project_id(&self) -> &str {
+        match self {
+            Self::List { project_id }
+            | Self::Latest { project_id }
+            | Self::Capture { project_id, .. }
+            | Self::Compare { project_id, .. } => project_id,
         }
     }
 }
@@ -573,6 +874,8 @@ impl<'a> Operation<'a> {
             Self::ContextSearch { .. } => "context.search",
             Self::ContextSourcePreview { .. } => "context.sourcePreview",
             Self::Codex(request) => request.name(),
+            Self::Task(request) => request.name(),
+            Self::Working(request) => request.name(),
         }
     }
 
@@ -591,6 +894,8 @@ impl<'a> Operation<'a> {
             | Self::ContextSearch { project_id, .. }
             | Self::ContextSourcePreview { project_id, .. } => Some(project_id),
             Self::Codex(request) => Some(request.project_id()),
+            Self::Task(request) => Some(request.project_id()),
+            Self::Working(request) => Some(request.project_id()),
             _ => None,
         }
     }

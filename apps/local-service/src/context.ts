@@ -23,8 +23,8 @@ import {
 } from "./context-files.ts";
 import { contextCheckout, GitError } from "./git.ts";
 
-type Project = ProjectRecord & { identity: string | null };
-type Checkout = Awaited<ReturnType<typeof contextCheckout>>;
+export type ContextProject = ProjectRecord & { identity: string | null };
+export type ContextCheckout = Awaited<ReturnType<typeof contextCheckout>>;
 export type ContextOptions = {
   signal?: AbortSignal;
   limits?: Partial<typeof defaultContextLimits>;
@@ -80,7 +80,7 @@ export function manifestDigest(snapshot: Omit<ContextSnapshot, "digest">) {
   );
 }
 
-async function checkout(project: Project, signal: AbortSignal) {
+export async function checkout(project: ContextProject, signal: AbortSignal) {
   if (!project.identity) throw new GitError("project_identity_unknown");
   try {
     return await contextCheckout(project.root, {
@@ -132,7 +132,7 @@ function parseIndex(output: string, paths: string[]) {
   return index;
 }
 
-async function observe(repo: Checkout, paths: string[]) {
+export async function observe(repo: ContextCheckout, paths: string[]) {
   const before = await indexStamp(repo.gitDir);
   const [revision, rawIndex] = await Promise.all([
     repo.revision(),
@@ -147,7 +147,7 @@ async function observe(repo: Checkout, paths: string[]) {
   };
 }
 
-function captureEnvironment(options: ContextOptions) {
+export function captureEnvironment(options: ContextOptions) {
   const limits = { ...defaultContextLimits, ...options.limits };
   const deadline = AbortSignal.timeout(limits.deadlineMs);
   const signal = options.signal
@@ -156,8 +156,8 @@ function captureEnvironment(options: ContextOptions) {
   return { limits, signal };
 }
 
-function pathsFor(
-  repo: Checkout,
+export function pathsFor(
+  repo: ContextCheckout,
   options: ContextOptions,
   fileBytes: number,
   signal: AbortSignal,
@@ -173,7 +173,7 @@ function pathsFor(
 }
 
 export async function browseContext(
-  project: Project,
+  project: ContextProject,
   folder: string,
   prefix: string,
   options: ContextOptions,
@@ -196,7 +196,7 @@ export async function browseContext(
 }
 
 export async function captureContext(
-  project: Project,
+  project: ContextProject,
   selection: string[],
   options: ContextOptions = {},
 ) {

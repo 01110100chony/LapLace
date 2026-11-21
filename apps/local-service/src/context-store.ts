@@ -7,7 +7,8 @@ import {
   type ContextSnapshot,
   type ContextSummary,
 } from "@laplace/contracts";
-import { manifestDigest, sha256 } from "./context.ts";
+import { manifestDigest } from "./context.ts";
+import type { createCatalogBlobs } from "./catalog-blobs.ts";
 import { GitError } from "./git.ts";
 
 export const contextMigration = `
@@ -50,6 +51,7 @@ export function createContextStore(
   database: DatabaseSync,
   transaction: <T>(write: () => T) => T,
   lookup: (id: string) => { root: string; identity: string | null },
+  contents: ReturnType<typeof createCatalogBlobs>,
 ) {
   const summaryColumns = `
     schema_version AS schemaVersion, context_id AS contextId,
@@ -80,12 +82,6 @@ export function createContextStore(
       selected_index_digest, started_at, completed_at, status, issue, digest, included, omitted
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  const insertBlob = database.prepare(`
-    INSERT INTO context_blobs (sha256, bytes) VALUES (?, ?) ON CONFLICT(sha256) DO NOTHING
-  `);
-  const getBlob = database.prepare(
-    "SELECT bytes FROM context_blobs WHERE sha256 = ?",
-  );
   const insertEntry = database.prepare(`
     INSERT INTO context_entries (context_id, ordinal, path, blob_sha256, payload)
     VALUES (?, ?, ?, ?, ?)
@@ -168,12 +164,9 @@ export function createContextStore(
           const blob = entry.outcome === "included" ? entry.sha256 : null;
           if (blob && entry.outcome === "included" && !stored.has(blob)) {
             const bytes = blobs.get(blob);
-            if (!bytes || bytes.length !== entry.size || sha256(bytes) !== blob)
+            if (!bytes || bytes.length !== entry.size)
               throw new Error("Missing or invalid captured bytes");
-            insertBlob.run(blob, bytes);
-            const saved = getBlob.get(blob)?.bytes as Uint8Array | undefined;
-            if (!saved || !bytes.equals(saved))
-              throw new Error("Invalid stored blob");
+            contents.save(blob, bytes);
             stored.add(blob);
           }
           insertEntry.run(
@@ -216,23 +209,18 @@ export function createContextStore(
       contextId: string,
       path: string,
       expectedDigest?: string,
+      expectedSnapshotDigest?: string,
     ) {
-      const entry = get(projectId, contextId).entries.find(
-        (entry) => entry.path === path,
-      );
+      const snapshot = get(projectId, contextId);
+      if (expectedSnapshotDigest && snapshot.digest !== expectedSnapshotDigest)
+        throw new GitError("context_not_found");
+      const entry = snapshot.entries.find((entry) => entry.path === path);
       if (
         entry?.outcome !== "included" ||
         (expectedDigest && entry.sha256 !== expectedDigest)
       )
         throw new GitError("context_not_found");
-      const bytes = getBlob.get(entry.sha256)?.bytes as Uint8Array | undefined;
-      if (
-        !bytes ||
-        bytes.length !== entry.size ||
-        sha256(bytes) !== entry.sha256
-      )
-        throw new Error("Invalid stored blob");
-      return bytes;
+      return contents.read(entry.sha256, entry.size);
     },
   };
 }

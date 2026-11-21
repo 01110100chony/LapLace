@@ -2,7 +2,10 @@
 
 mod ipc;
 
-use ipc::{CodexMode, CodexRequest, ErrorCode, Fault, Operation, Response, SearchScope, Sidecar};
+use ipc::{
+    CodexMode, CodexRequest, ErrorCode, Fault, Operation, Response, SearchScope, Sidecar,
+    TaskRequest, WorkingRequest,
+};
 use tauri::{path::BaseDirectory, Manager, RunEvent, State, WebviewWindow};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 
@@ -297,6 +300,24 @@ async fn context_source_preview(
 }
 
 #[tauri::command]
+async fn task_request(
+    id: String,
+    request: TaskRequest,
+    sidecar: State<'_, Sidecar>,
+) -> Result<Response, Fault> {
+    Ok(sidecar.request(id, Operation::Task(&request)).await?)
+}
+
+#[tauri::command]
+async fn working_request(
+    id: String,
+    request: WorkingRequest,
+    sidecar: State<'_, Sidecar>,
+) -> Result<Response, Fault> {
+    Ok(sidecar.request(id, Operation::Working(&request)).await?)
+}
+
+#[tauri::command]
 async fn codex_request(
     id: String,
     mut request: CodexRequest,
@@ -410,7 +431,9 @@ fn main() {
             context_index,
             context_search,
             context_source_preview,
-            codex_request
+            codex_request,
+            task_request,
+            working_request
         ])
         .build(tauri::generate_context!())
         .expect("falha ao inicializar a janela do Laplace");

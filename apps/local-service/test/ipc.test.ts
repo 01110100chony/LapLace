@@ -32,12 +32,22 @@ import {
   type CodexMode,
   type Operation,
   type Results,
+  type TaskRunEvent,
 } from "@laplace/contracts";
 
+import { sha256 } from "../src/context.ts";
 import { openCatalog } from "../src/catalog.ts";
 import { CodexQueries, prepareCodex } from "../src/codex.ts";
 
 const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
+const dropTaskResultSchema =
+  "DROP TABLE result_reviews; DROP TABLE working_blobs; DROP TABLE working_snapshots; DROP TABLE task_result_files; DROP TABLE task_results;";
+const dropExecutionSchema = `
+  ${dropTaskResultSchema}
+  DROP TABLE task_execution_events;
+  DROP TABLE task_executions;
+  DROP INDEX tasks_project_task;
+`;
 
 async function fixture(t: TestContext) {
   const root = await mkdtemp(join(tmpdir(), "laplace-ipc-"));
@@ -52,8 +62,19 @@ async function fixture(t: TestContext) {
     root,
     dataDir,
     database: join(dataDir, "catalog.sqlite3"),
-    start(path = dataDir) {
-      const child = spawn(process.execPath, [entry, path], {
+    start(path = dataDir, mock?: "completed" | "cancel") {
+      // Exercise the sidecar's development argument gate without bundling it in the test.
+      const args = mock
+        ? [
+            "--import",
+            "data:text/javascript,globalThis.__LAPLACE_DEVELOPMENT__=true",
+            entry,
+            path,
+            "--codex-mock",
+            mock,
+          ]
+        : [entry, path];
+      const child = spawn(process.execPath, args, {
         windowsHide: true,
         stdio: ["pipe", "pipe", "inherit"],
       });
@@ -95,6 +116,10 @@ async function fixture(t: TestContext) {
           assert.deepEqual(await closed, [0, null]);
           stores.delete(stop);
         },
+        async crash() {
+          await stop();
+          stores.delete(stop);
+        },
       };
     },
     async repository(name: string) {
@@ -133,6 +158,767 @@ function git(path: string, ...args: string[]) {
 }
 
 test(
+  "migra C04 e O01, reabre a consulta offline e vincula tarefas somente à origem do projeto",
+  { timeout: 30_000 },
+  async (t) => {
+    const env = await fixture(t);
+    const repository = await env.repository("Histórico Codex");
+    const otherRepository = await env.repository("Outro histórico");
+    const path = "fruta.txt";
+    const original = "A fruta é pitanga.\r\n";
+    await writeFile(join(repository, path), original);
+
+    const first = env.start();
+    const projectId = (
+      await first.request("workspace.addLocal", { path: repository })
+    ).id;
+    const snapshot = await first.request("context.capture", {
+      projectId,
+      paths: [path],
+    });
+    const secondSnapshot = await first.request("context.capture", {
+      projectId,
+      paths: [path],
+    });
+    const otherProjectId = (
+      await first.request("workspace.addLocal", { path: otherRepository })
+    ).id;
+    await first.close();
+    {
+      using database = new DatabaseSync(env.database);
+      database.exec(
+        `${dropExecutionSchema} DROP TABLE tasks; DROP TABLE codex_history; PRAGMA user_version = 4`,
+      );
+    }
+
+    const scope = { projectId, contextId: snapshot.contextId };
+    const mock = env.start(env.dataDir, "completed");
+    const entry = snapshot.entries[0];
+    assert.ok(entry?.outcome === "included");
+    assert.equal(
+      (await mock.request("codex.status", { projectId })).mode,
+      "mock_development",
+    );
+    const digest = entry.sha256;
+    async function start(
+      service: ReturnType<typeof env.start>,
+      question: string,
+    ) {
+      const preview = await service.request("codex.prepare", {
+        ...scope,
+        selection: [{ path, sha256: digest, chunk: null }],
+        snapshotDigest: snapshot.digest,
+        question,
+      });
+      return service.request("codex.start", {
+        ...scope,
+        confirmed: true,
+        grantId: preview.grantId,
+        manifestDigest: preview.manifestDigest,
+      });
+    }
+    const question = "Qual era a fruta?";
+    const execution = await start(mock, question);
+    async function events(service: ReturnType<typeof env.start>) {
+      const received: CodexEvent[] = [];
+      for (let i = 0; i < 100; i++) {
+        const page = await service.request("codex.events", {
+          ...execution,
+          afterSeq: received.length,
+        });
+        received.push(...page.events);
+        if (!page.more && page.state !== "running") return { received, page };
+        if (!page.more) await delay(20);
+      }
+      assert.fail("A consulta não terminou");
+    }
+    const live = await events(mock);
+    assert.equal(live.page.state, "completed");
+    assert.equal(live.page.saved, true);
+    await mock.close();
+    const closing = env.start(env.dataDir, "cancel");
+    const cancelledQuestion = "Posso cancelar esta consulta?";
+    const cancelled = await start(closing, cancelledQuestion);
+    await closing.close();
+    await writeFile(join(repository, path), "A fruta agora é banana.\n");
+    {
+      using database = new DatabaseSync(env.database);
+      database.exec(
+        `${dropExecutionSchema} DROP TABLE tasks; PRAGMA user_version = 5`,
+      );
+    }
+
+    const offline = env.start();
+    const result = await offline.request("codex.history", {
+      ...scope,
+      before: null,
+    });
+    assert.deepEqual(
+      result.items.map(({ question, executionId, mode, state }) => ({
+        question,
+        executionId,
+        mode,
+        state,
+      })),
+      [
+        {
+          question: cancelledQuestion,
+          executionId: cancelled.executionId,
+          mode: "mock_development",
+          state: "cancelled",
+        },
+        {
+          question,
+          executionId: execution.executionId,
+          mode: "mock_development",
+          state: "completed",
+        },
+      ],
+    );
+    assert.deepEqual((await events(offline)).received, live.received);
+    const message = live.received.find((event) => event.type === "message");
+    assert.deepEqual(message?.citations, {
+      sources: [{ id: "source-1", path, verified: true }],
+      hasUnknown: false,
+    });
+    const citation = { ...execution, sourceId: "source-1" };
+    assert.equal(
+      (await offline.request("codex.citation", citation)).text,
+      original,
+    );
+    await assert.rejects(
+      offline.request("codex.citation", { ...citation, sourceId: "source-2" }),
+      { message: "context_not_found" },
+    );
+    for (const otherScope of [
+      { projectId: otherProjectId },
+      { contextId: secondSnapshot.contextId },
+    ]) {
+      await assert.rejects(
+        offline.request("codex.citation", { ...citation, ...otherScope }),
+        { message: "codex_execution_unavailable" },
+      );
+      await assert.rejects(
+        offline.request("codex.events", {
+          ...execution,
+          ...otherScope,
+          afterSeq: 0,
+        }),
+        { message: "codex_execution_unavailable" },
+      );
+    }
+    const direct = await offline.request("task.create", {
+      projectId,
+      taskId: "direct-fruit",
+      title: "Revisar dados",
+      objective: "Validar a entrada atual.",
+      source: null,
+    });
+    assert.equal(direct.revision, 1);
+    const linkedDraft = {
+      projectId,
+      taskId: "linked-fruit",
+      title: "Comparar as frutas",
+      objective: question,
+      source: {
+        contextId: execution.contextId,
+        executionId: execution.executionId,
+      },
+    };
+    await assert.rejects(
+      offline.request("task.create", {
+        ...linkedDraft,
+        projectId: otherProjectId,
+      }),
+      { message: "codex_execution_unavailable" },
+    );
+    await assert.rejects(
+      offline.request("task.create", {
+        ...linkedDraft,
+        source: { ...linkedDraft.source, contextId: secondSnapshot.contextId },
+      }),
+      { message: "codex_execution_unavailable" },
+    );
+    await assert.rejects(
+      offline.request("task.create", {
+        ...linkedDraft,
+        source: { ...linkedDraft.source, executionId: cancelled.executionId },
+      }),
+      { message: "codex_execution_unavailable" },
+    );
+    const linked = await offline.request("task.create", linkedDraft);
+    assert.deepEqual(linked.source, linkedDraft.source);
+    const edit = {
+      projectId,
+      taskId: linked.taskId,
+      expectedRevision: 1,
+      title: linked.title,
+      objective: "Conferir a captura histórica.",
+    };
+    const updated = await offline.request("task.update", edit);
+    assert.equal(updated.revision, 2);
+    assert.deepEqual(updated.source, linked.source);
+    await assert.rejects(offline.request("task.update", edit), {
+      message: "task_conflict",
+    });
+    assert.deepEqual(
+      await offline.request("task.create", linkedDraft),
+      updated,
+    );
+    assert.deepEqual(
+      (await offline.request("task.list", { projectId, before: null })).items,
+      [updated, direct],
+    );
+    assert.deepEqual(
+      (
+        await offline.request("task.list", {
+          projectId: otherProjectId,
+          before: null,
+        })
+      ).items,
+      [],
+    );
+    await assert.rejects(
+      offline.request("task.list", {
+        projectId: otherProjectId,
+        before: linked.taskId,
+      }),
+      { message: "task_unavailable" },
+    );
+    await offline.close();
+
+    {
+      using database = new DatabaseSync(env.database);
+      assert.equal(
+        database.prepare("PRAGMA user_version").get()?.user_version,
+        10,
+      );
+      for (const table of ["context_snapshots", "codex_history", "tasks"]) {
+        assert.equal(
+          database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()
+            ?.count,
+          2,
+        );
+      }
+      database
+        .prepare("UPDATE context_blobs SET bytes = ? WHERE sha256 = ?")
+        .run(Buffer.from("corrompido"), entry.sha256);
+    }
+    const damaged = env.start();
+    assert.deepEqual(
+      (await damaged.request("task.list", { projectId, before: null })).items,
+      [updated, direct],
+    );
+    const { received } = await events(damaged);
+    assert.equal(
+      received.find((event) => event.type === "message")?.citations?.sources[0]
+        ?.verified,
+      false,
+    );
+    await assert.rejects(damaged.request("codex.citation", citation), {
+      message: "context_not_found",
+    });
+    await damaged.close();
+  },
+);
+
+test(
+  "O02 persiste tentativas, coordena cancelamento e recupera queda sem repetir a execução",
+  { timeout: 30_000 },
+  async (t) => {
+    const env = await fixture(t);
+    const repository = await env.repository("Supervisor local");
+    const setup = env.start();
+    const { id: projectId } = await setup.request("workspace.addLocal", {
+      path: repository,
+    });
+    for (const taskId of ["first-task", "second-task"]) {
+      await setup.request("task.create", {
+        projectId,
+        taskId,
+        title: taskId,
+        objective: "Exercitar o supervisor local.",
+        source: null,
+      });
+    }
+    await setup.close();
+    {
+      using database = new DatabaseSync(env.database);
+      database.exec(`${dropExecutionSchema} PRAGMA user_version = 6`);
+    }
+
+    const worker = env.start(env.dataDir, "cancel");
+    const observer = env.start(env.dataDir, "cancel");
+    const first = {
+      projectId,
+      taskId: "first-task",
+      requestId: "same-request",
+      expectedRevision: 1,
+    };
+    assert.equal(
+      (await worker.request("execution.latest", first)).availableMode,
+      "mock_development",
+    );
+    const attempt = await worker.request("task.start", first);
+    const ref = {
+      projectId,
+      taskId: first.taskId,
+      executionId: attempt.executionId,
+    };
+    assert.equal(
+      (await observer.request("task.start", first)).executionId,
+      ref.executionId,
+    );
+    const second = {
+      ...first,
+      taskId: "second-task",
+      requestId: "second-request",
+    };
+    await assert.rejects(observer.request("task.start", second), {
+      message: "task_busy",
+    });
+    await assert.rejects(
+      observer.request("task.start", { ...second, requestId: first.requestId }),
+      { message: "task_conflict" },
+    );
+    await assert.rejects(
+      observer.request("execution.events", {
+        ...ref,
+        taskId: second.taskId,
+        afterSeq: 0,
+      }),
+      { message: "task_execution_unavailable" },
+    );
+    assert.equal(
+      (await observer.request("execution.cancel", ref)).state,
+      "cancelling",
+    );
+
+    async function collect(
+      service: ReturnType<typeof env.start>,
+      scope: typeof ref,
+    ) {
+      const events: TaskRunEvent[] = [];
+      for (let i = 0; i < 150; i++) {
+        const page = await service.request("execution.events", {
+          ...scope,
+          afterSeq: events.length,
+        });
+        events.push(...page.events);
+        if (!page.more && page.finishedAt) return { page, events };
+        if (!page.more) await delay(20);
+      }
+      assert.fail("Tentativa sem estado terminal");
+    }
+    const cancelled = await collect(observer, ref);
+    assert.equal(cancelled.page.state, "cancelled");
+    assert.equal(
+      (await observer.request("execution.result", ref)).result,
+      null,
+    );
+    assert.equal(cancelled.events[0]?.type, "queued");
+    assert.equal(
+      cancelled.events.filter(({ type }) => type === "cancel_requested").length,
+      1,
+    );
+    assert.equal(
+      cancelled.events.filter(({ type }) => type === "terminal").length,
+      1,
+    );
+    assert.equal(
+      (await observer.request("execution.cancel", ref)).state,
+      "cancelled",
+    );
+
+    const performing = await worker.request("task.start", second);
+    assert.equal(performing.state, "running");
+    await worker.crash();
+    await observer.close();
+    const restarted = env.start();
+    const status = await restarted.request("execution.latest", second);
+    assert.equal(status.availableMode, null);
+    assert.equal(status.latest?.executionId, performing.executionId);
+    assert.equal(status.latest?.state, "interrupted");
+    assert.deepEqual(
+      await restarted.request("task.start", second),
+      status.latest,
+    );
+    await assert.rejects(
+      restarted.request("task.start", {
+        ...second,
+        requestId: "explicit-retry",
+      }),
+      { message: "task_runner_unavailable" },
+    );
+    const recovered = await collect(restarted, {
+      projectId,
+      taskId: second.taskId,
+      executionId: performing.executionId,
+    });
+    assert.equal(
+      (
+        await restarted.request("execution.result", {
+          projectId,
+          taskId: second.taskId,
+          executionId: performing.executionId,
+        })
+      ).result,
+      null,
+    );
+    assert.equal(
+      recovered.events.filter(({ type }) => type === "terminal").length,
+      1,
+    );
+    assert.deepEqual(
+      recovered.events.map(({ seq }) => seq),
+      recovered.events.map((_, index) => index + 1),
+    );
+    await restarted.close();
+  },
+);
+
+test(
+  "O03 preserva o diff da simulação sem tocar no checkout e reabre os bytes offline",
+  { timeout: 25_000 },
+  async (t) => {
+    const env = await fixture(t);
+    const folder = await env.repository("Resultado local");
+    const path = "resultado.txt";
+    const original = "Arquivo do usuário.\n";
+    const sourceFile = join(folder, path);
+    await writeFile(sourceFile, original);
+    git(folder, "add", "--", path);
+    git(folder, "commit", "-qm", "Arquivo inicial");
+    const worker = env.start(env.dataDir, "completed");
+    const { id: projectId } = await worker.request("workspace.addLocal", {
+      path: folder,
+    });
+    const task = await worker.request("task.create", {
+      projectId,
+      taskId: "result-task",
+      title: "Resultado",
+      objective: "Preservar o diff.",
+      source: null,
+    });
+    const input = {
+      projectId,
+      taskId: task.taskId,
+      expectedRevision: task.revision,
+    };
+
+    async function complete(service: typeof worker, requestId: string) {
+      const { executionId } = await service.request("task.start", {
+        ...input,
+        requestId,
+      });
+      const ref = { projectId, taskId: task.taskId, executionId };
+      for (let i = 0; i < 150; i++) {
+        const { latest } = await service.request("execution.latest", input);
+        if (latest?.finishedAt) {
+          assert.equal(latest.state, "completed");
+          return ref;
+        }
+        await delay(20);
+      }
+      assert.fail("Resultado sem estado terminal");
+    }
+
+    const old = await complete(worker, "legacy-result");
+    await worker.close();
+    {
+      using database = new DatabaseSync(env.database);
+      database.exec(`${dropTaskResultSchema} PRAGMA user_version = 7`);
+    }
+    const migrated = env.start(env.dataDir, "completed");
+    assert.equal(
+      (await migrated.request("execution.result", old)).result,
+      null,
+    );
+    const scope = await complete(migrated, "preserve-result");
+    const captured = await migrated.request("execution.result", scope);
+    assert.ok(captured.result);
+    assert.equal(captured.result.mode, "mock_development");
+    assert.deepEqual(
+      captured.result.changes.map((item) => item.path),
+      [path],
+    );
+    const request = { ...scope, path };
+    const content = await migrated.request("execution.change", request);
+    assert.equal(content.beforeText, "Resultado inicial da simulação.\n");
+    assert.equal(content.afterText, "Execução simulada concluída.\n");
+    assert.equal(content.change.before?.sha256, sha256(content.beforeText));
+    assert.equal(content.change.after?.sha256, sha256(content.afterText));
+    assert.equal(await readFile(sourceFile, "utf8"), original);
+    assert.equal(git(folder, "status", "--porcelain"), "");
+    await migrated.close();
+    await writeFile(sourceFile, "Edição posterior do usuário.\n");
+    {
+      using database = new DatabaseSync(env.database);
+      database.exec("DROP TABLE result_reviews; PRAGMA user_version = 9");
+    }
+
+    const offline = env.start();
+    assert.deepEqual(
+      await offline.request("execution.result", scope),
+      captured,
+    );
+    assert.deepEqual(
+      await offline.request("execution.change", request),
+      content,
+    );
+    await assert.rejects(
+      offline.request("execution.change", { ...request, path: "unlisted.txt" }),
+      { message: "task_result_unavailable" },
+    );
+    await assert.rejects(
+      offline.request("execution.change", {
+        ...request,
+        path: "../resultado.txt",
+      }),
+      { message: "invalid_request" },
+    );
+    await assert.rejects(
+      offline.request("execution.change", { ...request, taskId: "other-task" }),
+      { message: "task_execution_unavailable" },
+    );
+    const reviewStatus = await offline.request("result.reviewStatus", scope);
+    assert.equal(reviewStatus.latest, null);
+    const source = {
+      ...scope,
+      expectedBase: reviewStatus.evidence.resultDigest,
+      expectedRevision: 0,
+      choice: "approved",
+      requestId: "first-decision",
+    };
+    await assert.rejects(
+      offline.request("result.review", {
+        ...source,
+        expectedBase: "0".repeat(64),
+      }),
+      { message: "result_review_conflict" },
+    );
+    const approved = await offline.request("result.review", source);
+    assert.deepEqual(await offline.request("result.review", source), approved);
+    await assert.rejects(
+      offline.request("result.review", {
+        ...source,
+        requestId: "second-decision",
+        choice: "rejected",
+      }),
+      { message: "result_review_conflict" },
+    );
+    const rejected = await offline.request("result.review", {
+      ...source,
+      requestId: "second-decision",
+      choice: "rejected",
+      expectedRevision: 1,
+    });
+    assert.equal(rejected.revision, 2);
+    assert.equal(rejected.choice, "rejected");
+    assert.equal(
+      await readFile(sourceFile, "utf8"),
+      "Edição posterior do usuário.\n",
+    );
+    await offline.close();
+    const reviewed = env.start();
+    assert.equal(
+      (await reviewed.request("result.reviewStatus", scope)).latest?.recordedAt,
+      rejected.recordedAt,
+    );
+    await reviewed.close();
+    {
+      using database = new DatabaseSync(env.database);
+      assert.equal(
+        database.prepare("SELECT COUNT(*) AS count FROM result_reviews").get()
+          ?.count,
+        2,
+      );
+      database
+        .prepare("UPDATE context_blobs SET bytes = ? WHERE sha256 = ?")
+        .run(
+          Buffer.alloc(content.change.after!.bytes, "x"),
+          content.change.after!.sha256,
+        );
+    }
+    const damaged = env.start();
+    await assert.rejects(damaged.request("execution.change", request), {
+      message: "task_result_unavailable",
+    });
+    await assert.rejects(damaged.request("result.reviewStatus", scope), {
+      message: "task_result_unavailable",
+    });
+    await damaged.close();
+  },
+);
+
+test(
+  "G01 preserva HEAD, índice e disco, com renome, exclusão e arquivos novos opt-in",
+  { timeout: 50_000 },
+  async (t) => {
+    const env = await fixture(t);
+    const root = await env.repository("Git em três estados");
+    const path = "versão [literal].txt";
+    const moveFrom = "antigo nome.txt";
+    const moveTo = "novo nome.txt";
+    const removedPath = "removido.txt";
+    const newPath = "arquivo novo.txt";
+    const binaryPath = "blob.bin";
+    const secretPath = ".env";
+    const head = "Estado comitado.\n";
+    const index = "Estado no índice.\r\n";
+    const disk = "Estado no disco.\n";
+    git(root, "config", "core.autocrlf", "false");
+    await writeFile(join(root, path), head);
+    await writeFile(join(root, moveFrom), "Conteúdo da renomeação.\n");
+    await writeFile(join(root, removedPath), "Conteúdo removido.\n");
+    git(root, "add", "--", ".");
+    git(root, "commit", "-qm", "Base");
+    await writeFile(join(root, path), index);
+    git(root, "--literal-pathspecs", "add", "--", path);
+    await writeFile(join(root, path), disk);
+    git(root, "mv", "--", moveFrom, moveTo);
+    git(root, "rm", "--", removedPath);
+    await writeFile(join(root, binaryPath), Buffer.from([0, 1, 255]));
+    git(root, "add", "--", binaryPath);
+    await writeFile(join(root, newPath), "Arquivo escolhido depois.\n");
+    await writeFile(join(root, secretPath), "DADO_FICTICIO=omitido\n");
+    const originalIndex = await readFile(join(root, ".git", "index"));
+    const service = env.start();
+    const { id: projectId } = await service.request("workspace.addLocal", {
+      path: root,
+    });
+    const live = await service.request("working.list", { projectId });
+    assert.equal(
+      live.changes.find((change) => change.path === path)?.status,
+      "MM",
+    );
+    assert.equal(
+      live.changes.find((change) => change.path === moveTo)?.from,
+      moveFrom,
+    );
+    assert.equal(
+      live.changes.find((change) => change.path === newPath)?.kind,
+      "untracked",
+    );
+    assert.ok(!live.changes.some((change) => change.path === secretPath));
+    await assert.rejects(
+      service.request("working.capture", { projectId, paths: [secretPath] }),
+      { message: "working_changed" },
+    );
+    const saved = await service.request("working.capture", {
+      projectId,
+      paths: [path, moveTo, removedPath, binaryPath],
+    });
+    assert.ok(!saved.files.some((file) => file.path === newPath));
+    const ref = { projectId, snapshotId: saved.snapshotId };
+    const staged = await service.request("working.compare", {
+      ...ref,
+      path,
+      layer: "staged",
+    });
+    assert.deepEqual([staged.beforeText, staged.afterText], [head, index]);
+    const unstaged = await service.request("working.compare", {
+      ...ref,
+      path,
+      layer: "unstaged",
+    });
+    assert.deepEqual([unstaged.beforeText, unstaged.afterText], [index, disk]);
+    const moved = await service.request("working.compare", {
+      ...ref,
+      path: moveTo,
+      layer: "staged",
+    });
+    assert.equal(moved.beforeText, "Conteúdo da renomeação.\n");
+    assert.equal(moved.afterText, moved.beforeText);
+    const removed = await service.request("working.compare", {
+      ...ref,
+      path: removedPath,
+      layer: "staged",
+    });
+    assert.equal(removed.beforeText, "Conteúdo removido.\n");
+    assert.equal(removed.after.kind, "absent");
+    const binary = await service.request("working.compare", {
+      ...ref,
+      path: binaryPath,
+      layer: "staged",
+    });
+    assert.equal(binary.after.kind, "omitted");
+    assert.equal(binary.afterText, null);
+    await assert.rejects(
+      service.request("working.compare", {
+        ...ref,
+        path: newPath,
+        layer: "unstaged",
+      }),
+      { message: "working_unavailable" },
+    );
+    const explicit = await service.request("working.capture", {
+      projectId,
+      paths: [newPath],
+    });
+    const newFile = await service.request("working.compare", {
+      projectId,
+      snapshotId: explicit.snapshotId,
+      path: newPath,
+      layer: "unstaged",
+    });
+    assert.equal(newFile.before.kind, "absent");
+    assert.equal(newFile.afterText, "Arquivo escolhido depois.\n");
+    assert.deepEqual(
+      await readFile(join(root, ".git", "index")),
+      originalIndex,
+    );
+    assert.equal(await readFile(join(root, path), "utf8"), disk);
+    await service.close();
+    await writeFile(join(root, path), "Nova edição após a captura.\n");
+    const offline = env.start();
+    assert.deepEqual(await offline.request("working.latest", { projectId }), {
+      projectId,
+      snapshot: explicit,
+    });
+    assert.deepEqual(
+      await offline.request("working.compare", {
+        ...ref,
+        path,
+        layer: "unstaged",
+      }),
+      unstaged,
+    );
+    assert.ok(staged.before.kind === "text" && staged.before.oid);
+    assert.ok(staged.after.kind === "text" && staged.after.oid);
+    const both = [
+      `0 ${"0".repeat(staged.before.oid.length)}\t${path}`,
+      `100644 ${staged.before.oid} 1\t${path}`,
+      `100644 ${staged.before.oid} 2\t${path}`,
+      `100644 ${staged.after.oid} 3\t${path}`,
+    ];
+    execFileSync("git", ["-C", root, "update-index", "--index-info"], {
+      input: `${both.join("\n")}\n`,
+      windowsHide: true,
+    });
+    const conflicted = await offline.request("working.capture", {
+      projectId,
+      paths: [path],
+    });
+    assert.equal(conflicted.files[0]?.kind, "conflicted");
+    assert.deepEqual(
+      conflicted.files[0]?.index.map(({ stage }) => stage),
+      [1, 2, 3],
+    );
+    await assert.rejects(
+      offline.request("working.compare", {
+        projectId,
+        snapshotId: conflicted.snapshotId,
+        path,
+        layer: "unstaged",
+      }),
+      { message: "working_conflict" },
+    );
+    await offline.close();
+  },
+);
+
+test(
   "primeiro início cria o catálogo vazio e o sidecar encerra com EOF",
   { timeout: 12_000 },
   async (t) => {
@@ -163,7 +949,7 @@ test(
     try {
       assert.equal(
         database.prepare("PRAGMA user_version").get()?.user_version,
-        4,
+        10,
       );
     } finally {
       database.close();
@@ -556,7 +1342,7 @@ test(
 
     const database = new DatabaseSync(env.database);
     try {
-      database.exec("PRAGMA user_version = 5");
+      database.exec("PRAGMA user_version = 11");
       const second = env.start();
       await assert.rejects(second.request("workspace.list"), {
         message: "catalog_unavailable",
@@ -564,9 +1350,9 @@ test(
       await second.close();
       assert.equal(
         database.prepare("PRAGMA user_version").get()?.user_version,
-        5,
+        11,
       );
-      database.exec("PRAGMA user_version = 4");
+      database.exec("PRAGMA user_version = 10");
     } finally {
       database.close();
     }
@@ -611,6 +1397,9 @@ test(
     // Restore the C01 schema in this disposable copy with real receipts and blobs.
     using database = new DatabaseSync(env.database);
     database.exec(`
+    ${dropExecutionSchema}
+    DROP TABLE tasks;
+    DROP TABLE codex_history;
     DROP TRIGGER context_search_delete_chunk;
     DROP TABLE context_fts;
     DROP TABLE context_search_chunks;
@@ -633,7 +1422,7 @@ test(
     );
     assert.equal(
       database.prepare("PRAGMA user_version").get()?.user_version,
-      4,
+      10,
     );
     assert.equal(
       database

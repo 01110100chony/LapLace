@@ -9,7 +9,15 @@ import {
   type ContextSourceRef,
   type ErrorCode,
   type Operation,
+  type ReviewInput,
   type Results,
+  type TaskDraft,
+  type TaskEdit,
+  type TaskRunRef,
+  type TaskScope,
+  type TaskStart,
+  type WorkingLayer,
+  type WorkingRef,
 } from "@laplace/contracts";
 
 type DesktopCommand =
@@ -28,7 +36,9 @@ type DesktopCommand =
   | "context_index"
   | "context_search"
   | "context_source_preview"
-  | "codex_request";
+  | "codex_request"
+  | "task_request"
+  | "working_request";
 type PickerOperation = "workspace.addLocal" | "project.relocate";
 type DesktopOperation = Exclude<Operation, "codex.approval">;
 type InvokeArgs = Record<string, unknown>;
@@ -55,6 +65,23 @@ const commands: Record<DesktopOperation, DesktopCommand> = {
   "codex.start": "codex_request",
   "codex.events": "codex_request",
   "codex.cancel": "codex_request",
+  "codex.history": "codex_request",
+  "codex.citation": "codex_request",
+  "task.list": "task_request",
+  "task.create": "task_request",
+  "task.update": "task_request",
+  "task.start": "task_request",
+  "execution.latest": "task_request",
+  "execution.events": "task_request",
+  "execution.cancel": "task_request",
+  "execution.result": "task_request",
+  "execution.change": "task_request",
+  "result.reviewStatus": "task_request",
+  "result.review": "task_request",
+  "working.list": "working_request",
+  "working.latest": "working_request",
+  "working.capture": "working_request",
+  "working.compare": "working_request",
 };
 
 export class DesktopError extends Error {
@@ -87,7 +114,9 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
       const command = commands[operation];
       const call = invoke(
         command,
-        command === "codex_request"
+        command === "codex_request" ||
+          command === "task_request" ||
+          command === "working_request"
           ? { id, request: { operation, ...args } }
           : { ...args, id },
       );
@@ -141,6 +170,159 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
     select: (projectId: string) => request("project.select", { projectId }),
     inspect: (projectId: string) => request("project.inspect", { projectId }),
     relocate: (projectId: string) => request("project.relocate", { projectId }),
+    working: {
+      list: (projectId: string) => request("working.list", { projectId }),
+      latest: (projectId: string) => request("working.latest", { projectId }),
+      async capture(projectId: string, paths: string[]) {
+        const snapshot = await request("working.capture", { projectId, paths });
+        if (
+          snapshot.files.length !== paths.length ||
+          !snapshot.files.every(({ path }) => paths.includes(path))
+        )
+          throw new DesktopError("invalid_response");
+        return snapshot;
+      },
+      async compare(
+        { projectId, snapshotId }: WorkingRef,
+        path: string,
+        layer: WorkingLayer,
+      ) {
+        const result = await request("working.compare", {
+          projectId,
+          snapshotId,
+          path,
+          layer,
+        });
+        if (
+          result.snapshotId !== snapshotId ||
+          result.path !== path ||
+          result.layer !== layer
+        )
+          throw new DesktopError("invalid_response");
+        return result;
+      },
+    },
+    task: {
+      list: (projectId: string, before: string | null = null) =>
+        request("task.list", { projectId, before }),
+      async create(draft: TaskDraft) {
+        const task = await request("task.create", draft);
+        if (
+          task.taskId !== draft.taskId ||
+          task.source?.contextId !== draft.source?.contextId ||
+          task.source?.executionId !== draft.source?.executionId
+        )
+          throw new DesktopError("invalid_response");
+        return task;
+      },
+      async update(edit: TaskEdit) {
+        const task = await request("task.update", edit);
+        if (
+          task.taskId !== edit.taskId ||
+          task.revision !== edit.expectedRevision + 1 ||
+          task.title !== edit.title.trim() ||
+          task.objective !== edit.objective.trim()
+        )
+          throw new DesktopError("invalid_response");
+        return task;
+      },
+    },
+    execution: {
+      async latest({ projectId, taskId }: TaskScope) {
+        const status = await request("execution.latest", { projectId, taskId });
+        if (status.taskId !== taskId)
+          throw new DesktopError("invalid_response");
+        return status;
+      },
+      async start(input: TaskStart) {
+        const run = await request("task.start", input);
+        if (
+          run.taskId !== input.taskId ||
+          run.requestId !== input.requestId ||
+          run.taskRevision !== input.expectedRevision
+        )
+          throw new DesktopError("invalid_response");
+        return run;
+      },
+      async events(
+        { projectId, taskId, executionId }: TaskRunRef,
+        afterSeq: number,
+      ) {
+        const page = await request("execution.events", {
+          projectId,
+          taskId,
+          executionId,
+          afterSeq,
+        });
+        if (
+          page.taskId !== taskId ||
+          page.executionId !== executionId ||
+          page.nextSeq !== afterSeq + page.events.length
+        )
+          throw new DesktopError("invalid_response");
+        return page;
+      },
+      async cancel({ projectId, taskId, executionId }: TaskRunRef) {
+        const run = await request("execution.cancel", {
+          projectId,
+          taskId,
+          executionId,
+        });
+        if (run.taskId !== taskId || run.executionId !== executionId)
+          throw new DesktopError("invalid_response");
+        return run;
+      },
+      async result({ projectId, taskId, executionId }: TaskRunRef) {
+        const result = await request("execution.result", {
+          projectId,
+          taskId,
+          executionId,
+        });
+        if (result.taskId !== taskId || result.executionId !== executionId)
+          throw new DesktopError("invalid_response");
+        return result;
+      },
+      async change(
+        { projectId, taskId, executionId }: TaskRunRef,
+        path: string,
+      ) {
+        const preview = await request("execution.change", {
+          projectId,
+          taskId,
+          executionId,
+          path,
+        });
+        if (
+          preview.taskId !== taskId ||
+          preview.executionId !== executionId ||
+          preview.change.path !== path
+        )
+          throw new DesktopError("invalid_response");
+        return preview;
+      },
+      async reviewStatus({ projectId, taskId, executionId }: TaskRunRef) {
+        const status = await request("result.reviewStatus", {
+          projectId,
+          taskId,
+          executionId,
+        });
+        if (status.taskId !== taskId || status.executionId !== executionId)
+          throw new DesktopError("invalid_response");
+        return status;
+      },
+      async review(input: ReviewInput) {
+        const saved = await request("result.review", input);
+        if (
+          saved.taskId !== input.taskId ||
+          saved.executionId !== input.executionId ||
+          saved.choice !== input.choice ||
+          saved.revision !== input.expectedRevision + 1 ||
+          saved.evidence.resultDigest !== input.expectedBase
+        )
+          throw new DesktopError("invalid_response");
+        return saved;
+      },
+    },
     codex: {
       status: (projectId: string) => request("codex.status", { projectId }),
       async prepare(input: CodexPrepare) {
@@ -209,6 +391,33 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
       },
       cancel: ({ projectId, contextId, executionId }: CodexExecution) =>
         request("codex.cancel", { projectId, contextId, executionId }),
+      history: (projectId: string, contextId: string, before: string | null) =>
+        request("codex.history", { projectId, contextId, before }),
+      async citation(
+        {
+          projectId,
+          contextId,
+          executionId,
+          manifestDigest,
+          mode,
+        }: CodexExecution,
+        sourceId: string,
+      ) {
+        const citation = await request("codex.citation", {
+          projectId,
+          contextId,
+          executionId,
+          sourceId,
+        });
+        if (
+          citation.executionId !== executionId ||
+          citation.manifestDigest !== manifestDigest ||
+          citation.mode !== mode ||
+          citation.source.id !== sourceId
+        )
+          throw new DesktopError("invalid_response");
+        return citation;
+      },
     },
     context: {
       browse: (projectId: string, folder: string, prefix: string) =>
@@ -308,6 +517,24 @@ const messages: Record<ErrorCode, string> = {
   codex_busy: "Aguarde ou cancele a consulta em andamento.",
   codex_execution_unavailable:
     "A execução não está disponível no serviço atual. Prepare uma nova tentativa.",
+  task_unavailable: "A tarefa não está disponível neste projeto.",
+  task_conflict:
+    "A tarefa mudou ou já foi criada. Atualize a lista e reabra a tarefa.",
+  task_busy: "Há uma tarefa em andamento no Laplace.",
+  task_runner_unavailable:
+    "A execução de tarefas está indisponível neste modo.",
+  task_execution_unavailable:
+    "A tentativa não está disponível para esta tarefa.",
+  task_result_unavailable:
+    "O diff não está disponível ou não passou na verificação de integridade.",
+  working_changed:
+    "O estado Git mudou durante a captura. Atualize a lista e refaça a seleção.",
+  working_unavailable:
+    "A captura Git está indisponível ou não passou na verificação de integridade.",
+  working_conflict:
+    "O caminho está em conflito. Consulte os estágios do índice na captura.",
+  result_review_conflict:
+    "A revisão ou a evidência mudou. Atualize a revisão antes de registrar outra decisão.",
   context_source_unavailable:
     "A fonte preservada está indisponível ou não passou na verificação de integridade.",
 };

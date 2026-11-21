@@ -6,6 +6,8 @@ import type {
 } from "@laplace/contracts";
 import { useState } from "react";
 import { ContextView } from "./ContextView";
+import { TaskView, type TaskProposal } from "./TaskView";
+import { WorkingTreeView } from "./WorkingTreeView";
 import type { createDesktopClient } from "./ipc";
 
 export type ServiceStatus =
@@ -221,6 +223,9 @@ export function ProjectView({
   relocate,
   contextClient,
   codexClient,
+  taskClient,
+  executionClient,
+  workingClient,
 }: {
   project: ProjectRecord;
   summary: GitObservation | undefined;
@@ -229,9 +234,15 @@ export function ProjectView({
   relocate: () => void;
   contextClient: ReturnType<typeof createDesktopClient>["context"];
   codexClient: ReturnType<typeof createDesktopClient>["codex"];
+  taskClient: ReturnType<typeof createDesktopClient>["task"];
+  executionClient: ReturnType<typeof createDesktopClient>["execution"];
+  workingClient: ReturnType<typeof createDesktopClient>["working"];
 }) {
   const loading = status.state === "loading";
-  const [section, setSection] = useState<"overview" | "context">("overview");
+  const [section, setSection] = useState<
+    "overview" | "context" | "tasks" | "working"
+  >("overview");
+  const [taskProposal, setTaskProposal] = useState<TaskProposal>();
   return (
     <>
       <header className="headline project-headline">
@@ -267,6 +278,23 @@ export function ProjectView({
         >
           Contexto
         </button>
+        <button
+          className="button"
+          aria-current={section === "tasks" ? "page" : undefined}
+          onClick={() => {
+            if (section !== "tasks") setTaskProposal(undefined);
+            setSection("tasks");
+          }}
+        >
+          Tarefas
+        </button>
+        <button
+          className="button"
+          aria-current={section === "working" ? "page" : undefined}
+          onClick={() => setSection("working")}
+        >
+          Alterações Git
+        </button>
       </nav>
       {loading && (
         <p className="panel loading inspection-status" role="status">
@@ -283,13 +311,30 @@ export function ProjectView({
           )}
         </div>
       )}
-      {section === "context" ? (
+      {section === "tasks" ? (
+        <TaskView
+          projectId={project.id}
+          client={taskClient}
+          executionClient={executionClient}
+          proposal={taskProposal}
+        />
+      ) : section === "working" ? (
+        <WorkingTreeView
+          key={project.root}
+          projectId={project.id}
+          client={workingClient}
+        />
+      ) : section === "context" ? (
         <ContextView
           key={`${project.id}/${project.root}`}
           projectId={project.id}
           projectName={project.name}
           client={contextClient}
           codex={codexClient}
+          onCreateTask={(source, question) => {
+            setTaskProposal({ source, objective: question });
+            setSection("tasks");
+          }}
         />
       ) : (
         summary && (

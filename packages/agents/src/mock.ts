@@ -19,7 +19,7 @@ const response =
     type: "item.completed",
     item: {
       type: "agent_message",
-      text: "Resposta simulada. Fonte fictícia: trecho de exemplo.",
+      text: "Resposta simulada. Citação fictícia [source-1].",
     },
   }) + "\n";
 

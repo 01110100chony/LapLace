@@ -16,6 +16,8 @@ fn main() {
         "context_search",
         "context_source_preview",
         "codex_request",
+        "task_request",
+        "working_request",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(commands))
         .expect("falha ao configurar o host Tauri");

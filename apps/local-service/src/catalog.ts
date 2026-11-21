@@ -16,6 +16,19 @@ import {
   contextSearchMigration,
   createContextSearch,
 } from "./context-search.ts";
+import { codexHistoryMigration, createCodexHistory } from "./codex-history.ts";
+import { createTaskStore, tasksMigration } from "./tasks.ts";
+import {
+  createTaskExecutionStore,
+  taskExecutionMigration,
+} from "./task-execution-store.ts";
+import { createCatalogBlobs } from "./catalog-blobs.ts";
+import {
+  createTaskResultStore,
+  taskResultMigration,
+} from "./task-result-store.ts";
+import { createWorkingStore, workingMigration } from "./working-store.ts";
+import { createResultReviewStore, reviewMigration } from "./result-review.ts";
 
 const migrations = [
   `CREATE TABLE projects (
@@ -39,6 +52,12 @@ const migrations = [
    ) STRICT;`,
   contextMigration,
   contextSearchMigration,
+  codexHistoryMigration,
+  tasksMigration,
+  taskExecutionMigration,
+  taskResultMigration,
+  workingMigration,
+  reviewMigration,
 ];
 
 type RegisteredProject = ProjectRecord & { identity: string | null };
@@ -182,10 +201,22 @@ export function openCatalog(dataDir: string) {
       return { id: project.id, name: project.name, root, ...summary };
     }
 
-    const context = createContextStore(database, write, lookup);
+    const blobs = createCatalogBlobs(database);
+    const context = createContextStore(database, write, lookup, blobs);
+    const codexHistory = createCodexHistory(database, context);
     return {
       context,
       contextSearch: createContextSearch(database, context, read, write),
+      codexHistory,
+      tasks: createTaskStore(database, write, codexHistory),
+      executions: createTaskExecutionStore(
+        database,
+        read,
+        write,
+        createTaskResultStore(database, blobs),
+        createResultReviewStore(database),
+      ),
+      working: createWorkingStore(database, blobs, lookup, write, read),
       list(): Catalog {
         const rows = list.all() as (ProjectRecord & {
           selectedProjectId: string | null;

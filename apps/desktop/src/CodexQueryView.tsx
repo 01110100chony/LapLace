@@ -6,16 +6,19 @@ import {
   isCodexQuestion,
   type CodexEvent,
   type CodexExecution,
-  type CodexMode,
+  type CodexHistory,
+  type CodexHistoryItem,
   type CodexPreview,
   type CodexSelection,
   type CodexStatus,
   type ContextSnapshot,
   type ContextSourcePreview,
+  type TaskSource,
 } from "@laplace/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DesktopError, errorMessage, type createDesktopClient } from "./ipc";
 import { createLatestRequest } from "./workspace";
+import { CodexResponse, modeLabel, stateLabel } from "./CodexResponse";
 
 type Client = ReturnType<typeof createDesktopClient>["codex"];
 const availability: Record<CodexStatus["state"], string> = {
@@ -30,97 +33,6 @@ const availability: Record<CodexStatus["state"], string> = {
   mock_ready: "Simulação local com dados fictícios.",
   workspace_ready: "Codex disponível. Isolamento de leitura não verificado.",
 };
-const modeLabel: Record<CodexMode, string> = {
-  verified_isolated: "Modo isolado",
-  mock_development: "Mock de desenvolvimento",
-  unconfined_workspace_development: "Codex real em Workspace Dev",
-};
-const stateLabel = {
-  running: "Consulta em andamento",
-  completed: "Consulta concluída",
-  failed: "Falha na consulta",
-  cancelled: "Consulta cancelada",
-  interrupted: "Consulta interrompida",
-  timeout: "Tempo da consulta esgotado",
-};
-const failures = {
-  launch_failed: "Falha ao iniciar o processo.",
-  authentication_failed: "A autenticação da consulta falhou.",
-  provider_failed: "O CLI ou o provedor reportou uma falha.",
-  protocol_error: "O fluxo JSONL terminou sem indicar uma resposta completa.",
-  output_limit: "O fluxo excedeu o limite de saída.",
-  workspace_failed: "Falha ao preparar a área temporária.",
-};
-
-function ExecutionProgress({
-  events,
-  mode,
-  trackingInterrupted,
-}: {
-  events: CodexEvent[];
-  mode: CodexMode;
-  trackingInterrupted: boolean;
-}) {
-  const simulated = mode === "mock_development";
-  const terminal = events.find((item) => item.type === "terminal");
-  const session = events.find((item) => item.type === "session");
-  const notices = events.filter((item) => item.type === "notice").length;
-  return (
-    <section className="context-result" aria-labelledby="codex-response">
-      <h4 id="codex-response">
-        {simulated ? "Resposta simulada" : "Resposta do Codex"}
-      </h4>
-      <p className="context-muted">
-        {modeLabel[mode]}
-        {mode === "unconfined_workspace_development" &&
-          " · Isolamento de leitura não verificado"}
-      </p>
-      <p role="status">
-        {terminal
-          ? stateLabel[terminal.state]
-          : trackingInterrupted
-            ? "Acompanhamento da consulta interrompido"
-            : events.some((event) => event.type === "progress")
-              ? "Processando a pergunta…"
-              : "Consulta autorizada. Iniciando…"}
-      </p>
-      {terminal?.failure && (
-        <p className="service-error">{failures[terminal.failure]}</p>
-      )}
-      {events
-        .filter((item) => item.type === "message")
-        .map(({ seq, text }) => (
-          <pre key={seq} className="codex-message">
-            {text}
-          </pre>
-        ))}
-      {!simulated && (
-        <p className="context-muted">
-          As afirmações e referências no texto são do modelo. O Laplace verifica
-          a origem das fontes na prévia.
-        </p>
-      )}
-      <details>
-        <summary>Dados da execução</summary>
-        {session && (
-          <p>
-            {simulated ? "Sessão simulada" : "Sessão do provedor"}{" "}
-            <code>{session.sessionId}</code>
-          </p>
-        )}
-        {notices > 0 && <p>Eventos ignorados pelo adaptador: {notices}</p>}
-        {events
-          .filter((item) => item.type === "usage")
-          .map(({ seq, input, cachedInput, output }) => (
-            <p key={seq}>
-              {input} tokens de entrada · {cachedInput} em cache · {output} de
-              saída
-            </p>
-          ))}
-      </details>
-    </section>
-  );
-}
 
 export function CodexQueryView({
   projectId,
@@ -128,21 +40,33 @@ export function CodexQueryView({
   client,
   snapshot,
   excerpts,
+  onCreateTask,
 }: {
   projectId: string;
   projectName: string;
   client: Client;
   snapshot: ContextSnapshot | undefined;
   excerpts: ContextSourcePreview[];
+  onCreateTask: (source: TaskSource, question: string) => void;
 }) {
   const [status, setStatus] = useState<CodexStatus>();
   const [checking, setChecking] = useState(true);
   const [selection, setSelection] = useState<CodexSelection[]>([]);
   const [question, setQuestion] = useState("");
   const [preview, setPreview] = useState<CodexPreview>();
-  const [execution, setExecution] = useState<CodexExecution>();
+  const [display, setDisplay] = useState<{
+    execution: CodexExecution;
+    question: string;
+    fromHistory: boolean;
+  }>();
+  const execution = display?.execution;
+  const contextId = snapshot?.contextId;
+  const [history, setHistory] = useState<CodexHistory>();
+  const [loadingHistory, setLoadingHistory] = useState(!!contextId);
+  const [historyProblem, setHistoryProblem] = useState("");
   const [usedGrant, setUsedGrant] = useState<string>();
   const [events, setEvents] = useState<CodexEvent[]>([]);
+  const [saved, setSaved] = useState<boolean>();
   const [trackingInterrupted, setTrackingInterrupted] = useState(false);
   const [running, setRunning] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -152,6 +76,7 @@ export function CodexQueryView({
     status: createLatestRequest(),
     prepare: createLatestRequest(),
     start: createLatestRequest(),
+    history: createLatestRequest(),
   }));
   const heading = useRef<HTMLHeadingElement>(null);
   const mounted = useRef(false);
@@ -170,6 +95,34 @@ export function CodexQueryView({
     };
   }, [client, requests]);
 
+  const fetchHistory = useCallback(
+    (before: string | null = null) => {
+      if (!contextId) return;
+      setLoadingHistory(true);
+      setHistoryProblem("");
+      void requests.history.run(
+        () => client.history(projectId, contextId, before),
+        (page) => {
+          setHistory((previous) =>
+            before && previous
+              ? { ...page, items: [...previous.items, ...page.items] }
+              : page,
+          );
+          setLoadingHistory(false);
+        },
+        (error) => {
+          setHistoryProblem(errorMessage(error));
+          setLoadingHistory(false);
+        },
+      );
+    },
+    [client, contextId, projectId, requests],
+  );
+
+  useEffect(() => {
+    fetchHistory();
+  }, [fetchHistory]);
+
   useEffect(() => {
     if (!execution) return;
     let disposed = false;
@@ -186,12 +139,18 @@ export function CodexQueryView({
         } else {
           setRunning(false);
           setCancelling(false);
-          run.current = null;
+          setSaved(page.saved);
+          if (run.current?.executionId === current.executionId) {
+            run.current = null;
+            fetchHistory();
+          }
         }
       } catch (error) {
         if (disposed) return;
-        void client.cancel(current).catch(() => {});
-        run.current = null;
+        if (run.current?.executionId === current.executionId) {
+          void client.cancel(current).catch(() => {});
+          run.current = null;
+        }
         setTrackingInterrupted(true);
         setRunning(false);
         setCancelling(false);
@@ -203,7 +162,7 @@ export function CodexQueryView({
       disposed = true;
       clearTimeout(timer);
     };
-  }, [client, execution]);
+  }, [client, execution, fetchHistory]);
 
   const fetchStatus = useCallback(() => {
     void requests.status.run(
@@ -287,8 +246,13 @@ export function CodexQueryView({
       (data) => {
         run.current = data;
         setUsedGrant(preview.grantId);
-        setExecution(data);
+        setDisplay({
+          execution: data,
+          question: preview.question,
+          fromHistory: false,
+        });
         setEvents([]);
+        setSaved(undefined);
         setTrackingInterrupted(false);
         setBusy(false);
         setRunning(true);
@@ -303,6 +267,19 @@ export function CodexQueryView({
           check();
       },
     );
+  }
+
+  function openHistory(item: CodexHistoryItem) {
+    if (running || busy) return;
+    setProblem("");
+    setEvents([]);
+    setSaved(undefined);
+    setTrackingInterrupted(false);
+    setDisplay({
+      execution: { ...item },
+      question: item.question,
+      fromHistory: true,
+    });
   }
 
   function cancel() {
@@ -373,6 +350,70 @@ export function CodexQueryView({
           Isolamento de leitura não verificado. Use somente dados fictícios ou
           não sensíveis.
         </p>
+      )}
+      {contextId && (
+        <details className="context-result">
+          <summary>Histórico da captura</summary>
+          {loadingHistory && (
+            <p className="context-muted">Carregando histórico…</p>
+          )}
+          {historyProblem && (
+            <>
+              <p role="alert" className="service-error">
+                {historyProblem}
+              </p>
+              <button
+                type="button"
+                className="button"
+                onClick={() => fetchHistory()}
+              >
+                Recarregar histórico
+              </button>
+            </>
+          )}
+          {!loadingHistory && !historyProblem && !history?.items.length && (
+            <p className="context-muted">
+              Nenhuma consulta salva nesta captura.
+            </p>
+          )}
+          {!!history?.items.length && (
+            <ul className="context-list">
+              {history.items.map((item) => (
+                <li key={item.executionId}>
+                  <button
+                    type="button"
+                    className="button codex-history-item"
+                    onClick={() => openHistory(item)}
+                    disabled={running || busy}
+                    aria-current={
+                      execution?.executionId === item.executionId
+                        ? true
+                        : undefined
+                    }
+                  >
+                    {item.question}
+                  </button>
+                  <p className="context-muted">
+                    <time dateTime={item.finishedAt}>
+                      {new Date(item.finishedAt).toLocaleString("pt-BR")}
+                    </time>
+                    {` · ${stateLabel[item.state]} · ${modeLabel[item.mode]}`}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+          {history?.nextBefore && (
+            <button
+              type="button"
+              className="button"
+              disabled={loadingHistory}
+              onClick={() => fetchHistory(history.nextBefore)}
+            >
+              Ver consultas anteriores
+            </button>
+          )}
+        </details>
       )}
       {!eligible ? (
         <p>Abra uma captura com fontes preservadas no histórico.</p>
@@ -539,6 +580,9 @@ export function CodexQueryView({
               </button>
             )}
           </div>
+          <p className="context-muted">
+            Pergunta e resposta ficam salvas neste dispositivo após a consulta.
+          </p>
         </section>
       )}
       {problem && (
@@ -546,11 +590,15 @@ export function CodexQueryView({
           {problem}
         </p>
       )}
-      {execution && (
-        <ExecutionProgress
+      {display && (
+        <CodexResponse
+          key={display.execution.executionId}
+          client={client}
+          {...display}
           events={events}
-          mode={execution.mode}
+          saved={saved}
           trackingInterrupted={trackingInterrupted}
+          onCreateTask={onCreateTask}
         />
       )}
     </section>

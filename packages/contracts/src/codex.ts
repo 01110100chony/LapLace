@@ -11,6 +11,7 @@ export const codexMaxEvents = 256;
 export const codexMaxLineBytes = 24 * 1024;
 export const codexMaxOutputBytes = 512 * 1024;
 export const codexPageSize = 4;
+export const codexHistoryPageSize = 6;
 
 export const codexModes = [
   "verified_isolated",
@@ -98,10 +99,14 @@ export const codexFailures = [
   "workspace_failed",
 ] as const;
 export type CodexFailure = (typeof codexFailures)[number];
+export type CodexCitations = {
+  sources: { id: string; path: string; verified: boolean }[];
+  hasUnknown: boolean;
+};
 export type CodexEvent = { seq: number } & (
   | { type: "started" }
   | { type: "session"; sessionId: string }
-  | { type: "message"; text: string }
+  | { type: "message"; text: string; citations?: CodexCitations }
   | { type: "progress"; stage: "turn" | "item" }
   | {
       type: "notice";
@@ -133,6 +138,20 @@ export type CodexPage = CodexExecution & {
   events: CodexEvent[];
   nextSeq: number;
   more: boolean;
+  saved?: boolean;
+};
+export type CodexHistoryItem = CodexExecution & {
+  question: string;
+  state: Exclude<CodexState, "running">;
+  finishedAt: string;
+};
+export type CodexHistory = Scope & {
+  items: CodexHistoryItem[];
+  nextBefore: string | null;
+};
+export type CodexCitation = CodexExecution & {
+  source: CodexSource;
+  text: string;
 };
 export type CodexRequests =
   | { projectId: string; operation: "codex.status" }
@@ -147,6 +166,8 @@ export type CodexRequests =
           } & Grant)
         | { operation: "codex.events"; executionId: string; afterSeq: number }
         | { operation: "codex.cancel"; executionId: string }
+        | { operation: "codex.history"; before: string | null }
+        | { operation: "codex.citation"; executionId: string; sourceId: string }
       ));
 export type CodexResults = {
   "codex.status": CodexStatus;
@@ -155,6 +176,8 @@ export type CodexResults = {
   "codex.start": CodexExecution;
   "codex.events": CodexPage;
   "codex.cancel": CodexExecution;
+  "codex.history": CodexHistory;
+  "codex.citation": CodexCitation;
 };
 
 const utf8 = new TextEncoder();
@@ -186,6 +209,14 @@ function readSelection(value: unknown): CodexSelection | undefined {
     return { path, sha256, chunk };
 }
 
+function isSourceId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^source-[1-9]\d?$/.test(value) &&
+    Number(value.slice(7)) <= codexMaxSources
+  );
+}
+
 export function parseCodexRequest(
   value: Record<string, unknown>,
 ): CodexRequests | undefined {
@@ -202,6 +233,8 @@ export function parseCodexRequest(
     unconfinedConfirmed,
     executionId,
     afterSeq,
+    before,
+    sourceId,
   } = value;
   if (!isProjectId(projectId)) return;
   if (operation === "codex.status") return { operation, projectId };
@@ -254,14 +287,22 @@ export function parseCodexRequest(
     case "codex.cancel":
       if (isRequestId(executionId)) return { operation, ...scope, executionId };
       break;
+    case "codex.history":
+      if (before === null || isRequestId(before))
+        return { operation, ...scope, before };
+      break;
+    case "codex.citation":
+      if (isRequestId(executionId) && isSourceId(sourceId))
+        return { operation, ...scope, executionId, sourceId };
+      break;
   }
 }
 
-function isSource(value: unknown): boolean {
+function isSource(value: unknown): value is CodexSource {
   if (!isRecord(value) || !readSelection(value)) return false;
   const { range, bytes, id, sentSha256 } = value;
   return (
-    isRequestId(id) &&
+    isSourceId(id) &&
     isProjectId(sentSha256) &&
     count(bytes) &&
     bytes <= codexMaxSourceBytes &&
@@ -279,7 +320,23 @@ function isSource(value: unknown): boolean {
   );
 }
 
-function isEvent(value: unknown): value is CodexEvent {
+function isCitations(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    typeof value.hasUnknown === "boolean" &&
+    Array.isArray(value.sources) &&
+    value.sources.length <= codexMaxSources &&
+    value.sources.every(
+      (source: unknown) =>
+        isRecord(source) &&
+        isSourceId(source.id) &&
+        isContextPath(source.path) &&
+        typeof source.verified === "boolean",
+    )
+  );
+}
+
+export function isCodexEvent(value: unknown): value is CodexEvent {
   if (
     !isRecord(value) ||
     !count(value.seq) ||
@@ -293,7 +350,10 @@ function isEvent(value: unknown): value is CodexEvent {
     case "session":
       return isRequestId(value.sessionId);
     case "message":
-      return limit(value.text, codexMaxLineBytes);
+      return (
+        limit(value.text, codexMaxLineBytes) &&
+        (value.citations === undefined || isCitations(value.citations))
+      );
     case "progress":
       return oneOf(["turn", "item"], value.stage);
     case "notice":
@@ -316,11 +376,73 @@ function isEvent(value: unknown): value is CodexEvent {
   }
 }
 
+export function isCodexManifest(value: unknown): value is CodexManifest {
+  return (
+    isRecord(value) &&
+    isProjectId(value.projectId) &&
+    isProjectId(value.contextId) &&
+    oneOf(codexModes, value.mode) &&
+    value.schemaVersion === 1 &&
+    value.provider ===
+      (value.mode === "mock_development" ? "mock" : codexProvider) &&
+    value.profile === "read-only" &&
+    isProjectId(value.snapshotDigest) &&
+    isContextDate(value.capturedAt) &&
+    isCodexQuestion(value.question) &&
+    count(value.sourceBytes) &&
+    value.sourceBytes <= codexMaxSourceBytes &&
+    count(value.promptBytes) &&
+    value.promptBytes <= codexMaxPromptBytes &&
+    isProjectId(value.promptSha256) &&
+    Array.isArray(value.sources) &&
+    value.sources.length > 0 &&
+    value.sources.length <= codexMaxSources &&
+    value.sources.every(isSource) &&
+    value.sources.every(
+      (source, index) => source.id === `source-${index + 1}`,
+    ) &&
+    Array.isArray(value.omissions) &&
+    value.omissions.length <= maxContextFiles &&
+    value.omissions.every(
+      (item: unknown) =>
+        isRecord(item) &&
+        isContextPath(item.path) &&
+        oneOf(
+          ["not_selected", "snapshot_omission", "outside_excerpt"],
+          item.reason,
+        ),
+    )
+  );
+}
+
 export function isCodexResult(
   operation: keyof CodexResults,
   value: unknown,
 ): boolean {
   if (!isRecord(value) || !isProjectId(value.projectId)) return false;
+  if (operation === "codex.history") {
+    const { contextId, projectId, items, nextBefore } = value;
+    return (
+      isProjectId(contextId) &&
+      Array.isArray(items) &&
+      items.length <= codexHistoryPageSize &&
+      items.every(
+        (item: unknown) =>
+          isRecord(item) &&
+          item.projectId === projectId &&
+          item.contextId === contextId &&
+          isRequestId(item.executionId) &&
+          isProjectId(item.manifestDigest) &&
+          oneOf(codexModes, item.mode) &&
+          isCodexQuestion(item.question) &&
+          isContextDate(item.finishedAt) &&
+          item.state !== "running" &&
+          oneOf(codexStates, item.state),
+      ) &&
+      (nextBefore === null ||
+        (isRequestId(nextBefore) && nextBefore === items.at(-1)?.executionId))
+    );
+  }
   if (!oneOf(codexModes, value.mode)) return false;
   if (operation === "codex.status")
     return (
@@ -356,47 +478,29 @@ export function isCodexResult(
   }
   if (operation === "codex.prepare") {
     return (
-      value.schemaVersion === 1 &&
-      value.provider ===
-        (value.mode === "mock_development" ? "mock" : codexProvider) &&
-      value.profile === "read-only" &&
-      isProjectId(value.snapshotDigest) &&
-      isContextDate(value.capturedAt) &&
       isContextDate(value.expiresAt) &&
       isRequestId(value.grantId) &&
-      isCodexQuestion(value.question) &&
-      count(value.sourceBytes) &&
-      value.sourceBytes <= codexMaxSourceBytes &&
-      count(value.promptBytes) &&
-      value.promptBytes <= codexMaxPromptBytes &&
-      isProjectId(value.promptSha256) &&
-      Array.isArray(value.sources) &&
-      value.sources.length > 0 &&
-      value.sources.length <= codexMaxSources &&
-      value.sources.every(isSource) &&
-      Array.isArray(value.omissions) &&
-      value.omissions.length <= maxContextFiles &&
-      value.omissions.every(
-        (item: unknown) =>
-          isRecord(item) &&
-          isContextPath(item.path) &&
-          oneOf(
-            ["not_selected", "snapshot_omission", "outside_excerpt"],
-            item.reason,
-          ),
-      )
+      isCodexManifest(value)
     );
   }
   if (!isRequestId(value.executionId)) return false;
+  if (operation === "codex.citation")
+    return (
+      isSource(value.source) &&
+      limit(value.text, codexMaxSourceBytes) &&
+      utf8.encode(value.text).length === value.source.bytes
+    );
   if (operation !== "codex.events") return true;
   return (
     oneOf(codexStates, value.state) &&
     count(value.nextSeq) &&
     value.nextSeq <= codexMaxEvents &&
     typeof value.more === "boolean" &&
+    (value.saved === undefined ||
+      (value.state !== "running" && typeof value.saved === "boolean")) &&
     Array.isArray(value.events) &&
     value.events.length <= codexPageSize &&
-    value.events.every(isEvent) &&
+    value.events.every(isCodexEvent) &&
     (!value.events.length ||
       value.events.every(
         (event, i) =>

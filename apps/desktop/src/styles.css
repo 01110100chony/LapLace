@@ -719,6 +719,55 @@ h1 {
   gap: 8px;
 }
 
+.codex-history-item {
+  max-width: 100%;
+  text-align: start;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.task-result h4 {
+  margin: 12px 0 0;
+}
+
+.working-diff h4 {
+  margin: 12px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.working-diff [aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.text-diff {
+  max-height: 18rem;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--bg);
+  font-family: var(--mono);
+}
+
+.text-diff:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.diff-location {
+  color: var(--sub);
+}
+.diff-added {
+  color: var(--green);
+}
+.diff-removed {
+  color: var(--red);
+}
+.diff-versions {
+  margin: 8px 0;
+}
+
 .context-search {
   margin-bottom: 14px;
   min-width: 0;
@@ -756,7 +805,7 @@ h1 {
   margin-top: 4px;
 }
 
-.codex-form {
+:is(.codex-form, .task-fields) {
   display: grid;
   gap: 8px;
   min-inline-size: 0;
@@ -764,7 +813,8 @@ h1 {
   border-radius: 4px;
 }
 
-.codex-form textarea {
+.codex-form textarea,
+.task-fields :is(input, textarea) {
   resize: vertical;
   padding: 8px 10px;
   border: 1px solid var(--rule);
@@ -774,8 +824,13 @@ h1 {
   font: inherit;
 }
 
-.codex-form textarea:focus-visible {
+.codex-form textarea:focus-visible,
+.task-fields :is(input, textarea):focus-visible {
   outline: 2px solid var(--focus);
+}
+
+.task-form {
+  margin-bottom: 16px;
 }
 
 @media (max-width: 920px) {

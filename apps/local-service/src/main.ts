@@ -15,6 +15,8 @@ import { GitError, inspectRepository } from "./git.ts";
 import { openCatalog } from "./catalog.ts";
 import { browseContext, captureContext } from "./context.ts";
 import { CodexQueries, prepareCodex, type CodexDevelopment } from "./codex.ts";
+import { TaskSupervisor } from "./task-supervisor.ts";
+import { captureWorkingTree, listWorkingTree } from "./working-tree.ts";
 
 // Defined when the sidecar is bundled. The source entry point and the
 // distribution bundle ignore all development arguments.
@@ -32,15 +34,18 @@ function developmentFromHost([mode, value]: string[]):
 
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 const exit = new AbortController();
-const codex = new CodexQueries({
-  development:
-    typeof __LAPLACE_DEVELOPMENT__ !== "undefined" && __LAPLACE_DEVELOPMENT__
-      ? developmentFromHost(process.argv.slice(3))
-      : undefined,
-});
+const development =
+  typeof __LAPLACE_DEVELOPMENT__ !== "undefined" && __LAPLACE_DEVELOPMENT__
+    ? developmentFromHost(process.argv.slice(3))
+    : undefined;
+const codex = new CodexQueries({ development });
+const supervisor = new TaskSupervisor(
+  development?.mode === "mock_development" ? development.scenario : undefined,
+);
 input.once("close", () => {
   exit.abort();
-  codex.close();
+  void codex.close();
+  void supervisor.close();
 });
 const dataDir = process.argv[2] ?? "";
 const contextExclusions = (process.env.LAPLACE_CONTEXT_EXCLUDES ?? "")
@@ -60,6 +65,14 @@ function withCatalog<T>(
     if (error instanceof GitError) throw error;
     throw new CatalogError();
   }
+}
+
+function contextOptions(projectId: string) {
+  const protectedRoots = withCatalog((store) => store.list().projects)
+    .filter((entry) => entry.id !== projectId)
+    .map((entry) => entry.root);
+  protectedRoots.push(dataDir);
+  return { signal: exit.signal, protectedRoots, exclusions: contextExclusions };
 }
 
 async function respond(line: string): Promise<Response> {
@@ -104,6 +117,95 @@ async function respond(line: string): Promise<Response> {
     }
     const project = withCatalog((store) => store.lookup(request.projectId));
     switch (request.operation) {
+      case "working.list": {
+        const data = await listWorkingTree(project, contextOptions(project.id));
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
+      case "working.latest": {
+        const data = withCatalog(({ working }) => working.latest(project.id));
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
+      case "working.capture": {
+        const capture = await captureWorkingTree(
+          project,
+          request.paths,
+          contextOptions(project.id),
+        );
+        const data = withCatalog(({ working }) => working.save(capture));
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
+      case "working.compare": {
+        const data = withCatalog(({ working }) =>
+          working.compare(request, request.path, request.layer),
+        );
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
+      case "task.list": {
+        const data = withCatalog(({ tasks }) =>
+          tasks.list(project.id, request.before),
+        );
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
+      case "task.create": {
+        const data = withCatalog(({ tasks }) => tasks.create(request));
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
+      case "task.update": {
+        const data = withCatalog(({ tasks }) => tasks.update(request));
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
+      case "execution.latest": {
+        const data = withCatalog(({ executions }) =>
+          supervisor.latest(request, executions),
+        );
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
+      case "task.start": {
+        if (exit.signal.aborted) throw new GitError("task_runner_unavailable");
+        const data = withCatalog((store) =>
+          supervisor.start(request, store.executions, [
+            dataDir,
+            ...store.list().projects.map(({ root }) => root),
+          ]),
+        );
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
+      case "execution.events": {
+        const data = withCatalog(({ executions }) =>
+          executions.events(request, request.afterSeq),
+        );
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
+      case "execution.cancel": {
+        const data = withCatalog(({ executions }) =>
+          supervisor.cancel(request, executions),
+        );
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
+      case "execution.result": {
+        const data = withCatalog(({ executions }) =>
+          executions.result(request),
+        );
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
+      case "execution.change": {
+        const data = withCatalog(({ executions }) =>
+          executions.change(request, request.path),
+        );
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
+      case "result.reviewStatus": {
+        const data = withCatalog(({ executions }) =>
+          executions.reviewStatus(request),
+        );
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
+      case "result.review": {
+        const data = withCatalog(({ executions }) =>
+          executions.review(request),
+        );
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
       case "codex.status": {
         const data = await codex.status(project.id);
         return { ...envelope, operation: request.operation, ok: true, data };
@@ -126,15 +228,31 @@ async function respond(line: string): Promise<Response> {
       case "codex.start": {
         if (exit.signal.aborted)
           throw new GitError("codex_execution_unavailable");
-        const data = await codex.start(request);
+        const history = withCatalog((store) => store.codexHistory);
+        const data = await codex.start(request, history);
         return { ...envelope, operation: request.operation, ok: true, data };
       }
       case "codex.events": {
-        const data = codex.events(request);
+        const data = withCatalog(({ codexHistory }) =>
+          codex.events(request, codexHistory),
+        );
         return { ...envelope, operation: request.operation, ok: true, data };
       }
       case "codex.cancel": {
         const data = codex.cancel(request);
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
+      case "codex.history": {
+        const data = withCatalog(({ codexHistory, context }) => {
+          context.get(project.id, request.contextId);
+          return codexHistory.list(request, request.before);
+        });
+        return { ...envelope, operation: request.operation, ok: true, data };
+      }
+      case "codex.citation": {
+        const data = withCatalog(({ codexHistory }) =>
+          codex.citation(request, codexHistory),
+        );
         return { ...envelope, operation: request.operation, ok: true, data };
       }
       case "context.indexStatus": {
@@ -187,15 +305,7 @@ async function respond(line: string): Promise<Response> {
       case "context.browse":
       case "context.capture":
       case "context.validate": {
-        const protectedRoots = withCatalog((store) => store.list().projects)
-          .filter((entry) => entry.id !== project.id)
-          .map((entry) => entry.root);
-        protectedRoots.push(dataDir);
-        const options = {
-          signal: exit.signal,
-          protectedRoots,
-          exclusions: contextExclusions,
-        };
+        const options = contextOptions(project.id);
         if (request.operation === "context.browse") {
           const data = await browseContext(
             project,
@@ -293,7 +403,10 @@ async function serve() {
 }
 
 void serve()
-  .finally(() => catalog?.close())
+  .finally(async () => {
+    await Promise.all([codex.close(), supervisor.close()]);
+    catalog?.close();
+  })
   .catch(() => {
     process.exitCode = 1;
     input.close();

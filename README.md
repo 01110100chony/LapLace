@@ -213,7 +213,7 @@ Em **Contexto**, abra uma captura preservada e selecione arquivos em **Consultar
 
 ### Modos de consulta e desenvolvimento
 
-Enquanto o Windows Sandbox do host estiver indisponível, o C03.1 permite exercitar o fluxo de consulta e avançar com o C04 em ambiente de desenvolvimento.
+Os modos de desenvolvimento permitem exercitar o fluxo de consulta, incluindo histórico e citações.
 
 | Modo                               | Execução e garantias                                                                                                                                                                                                                                                                                 |
 | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -248,19 +248,27 @@ O host lê a configuração de desenvolvimento na inicialização do sidecar. Um
 
 ### Contratos e limites
 
-- `codex.status` detecta o executável, valida a versão e os parâmetros pelo help e consulta `login status`. O perfil estrito mantém a versão **0.141.0**. O Workspace Dev usa o perfil **0.157.0** com controles adicionais de ferramentas. A CLI lê sua própria autenticação e o Laplace não copia credenciais para a área temporária.
+- No Workspace Dev, `codex.status` detecta o executável, valida a versão e os parâmetros pelo help e consulta `login status`. Esse modo usa o perfil **0.157.0** com controles adicionais de ferramentas. A CLI usa sua própria autenticação. O perfil estrito é **0.141.0** e informa `confinement_unverified` enquanto o host não dispuser de uma fronteira para a CLI.
 - `codex.prepare` resolve o projeto e a captura pelo catálogo, confere o digest do manifesto C01 e verifica o SHA-256 dos blobs. Seleções C02 usam as coordenadas de bytes registradas no índice e os bytes preservados no C01. A prévia inclui um SHA-256 por trecho, o digest da entrada UTF-8 e um token de autorização efêmero. A autorização expira em cinco minutos ou ao preparar outra prévia.
 - `codex.start` consome uma autorização vinculada ao projeto, à captura, ao modo e ao digest da seleção. Para consultas reais, o sidecar cria uma área descartável com o manifesto local e as fontes selecionadas em seus caminhos relativos. A CLI inicia num diretório vazio separado das fontes e recebe pergunta e conteúdo por stdin. O manifesto local registra os caminhos omitidos e os bytes fora dos trechos. Esses metadados de omissão ficam no Laplace.
-- `codex.events` pagina até quatro eventos por sequência. `codex.cancel` solicita o encerramento da tentativa ativa. O adaptador mantém uma tentativa em memória, com até oito fontes, um arquivo inteiro ou um trecho por caminho, 64 KiB de fontes, 128 KiB de entrada, 24 KiB por linha JSONL, 512 KiB de saída por fluxo e 120 s por consulta. Uma seleção acima do limite é recusada. O limite de 192 KiB do IPC e o esquema SQLite v4 seguem em uso.
-- As respostas do modelo são exibidas como texto do provedor. As referências verificadas pelo Laplace identificam os bytes escolhidos no manifesto da consulta. O adaptador entrega estados terminais de conclusão, falha, interrupção, timeout ou cancelamento e mantém erros de diagnóstico sem a saída bruta do CLI. Gravação de conversas e validação de citações ficam para C04.
+- `codex.events` pagina até quatro eventos por sequência. `codex.cancel` solicita o encerramento da tentativa ativa. O adaptador mantém uma tentativa ativa em memória, com até oito fontes, um arquivo inteiro ou um trecho por caminho, 64 KiB de fontes, 128 KiB de entrada, 24 KiB por linha JSONL, 512 KiB de saída por fluxo e 120 s por consulta. Uma seleção acima do limite é recusada. O IPC tem limite de 192 KiB por mensagem.
+- O adaptador exibe o texto do provedor e entrega estados terminais de conclusão, falha, interrupção, timeout ou cancelamento. Os diagnósticos omitem a saída bruta da CLI.
 
 O perfil usa `exec --json --sandbox read-only --ephemeral --ignore-user-config --ignore-rules` com `approval_policy="never"`, sessões novas e ferramentas de shell, navegação e integrações de usuário desativadas na configuração. Ao iniciar o Workspace Dev, o build de desenvolvimento compila um auxiliar Windows que coloca a CLI em um Job Object com limite de memória de 768 MiB para a árvore de processos e encerramento no cancelamento, no timeout ou na perda do sidecar. A fronteira `VerifiedCodexBoundary` continua sendo o requisito do modo estrito. Consulte o [modo não interativo oficial](https://developers.openai.com/codex/noninteractive/) e o [sandbox Windows](https://developers.openai.com/codex/windows/).
 
-Para fechar o C03, falta integrar uma fronteira host que comprove a negação de leitura fora do conjunto autorizado, validar o canário com controles positivos e negativos e repetir a consulta autenticada dentro dessa fronteira. O resultado do Workspace Dev tem o modo registrado nos eventos paginados e o isolamento de leitura continua sem comprovação.
+### Sonda offline de confinamento (C03)
 
-### Verificação separada do confinamento
+Com o ambiente GNU configurado conforme o `AGENTS.md`, execute no PowerShell da conta de desenvolvimento:
 
-Execute a sonda abaixo no Windows com o caminho do executável nativo. Ela usa um `CODEX_HOME` descartável e dados fictícios. O controle lê os dois arquivos diretamente. O resultado de confinamento exige que o mesmo processo leia a fonte autorizada e receba uma negação de acesso ao canário externo. Uma falha ao iniciar o processo ou ao ler a fonte autorizada deixa a política sem validação.
+```powershell
+cargo run --locked --release --manifest-path apps/desktop/src-tauri/codex-job/Cargo.toml --target x86_64-pc-windows-gnu --target-dir apps/desktop/src-tauri/generated/codex-job -- --laplace-codex-boundary-probe
+```
+
+A sonda cria dois arquivos fictícios e um perfil descartável de AppContainer de privilégio reduzido (LPAC). A conta que iniciou a sonda deve ler ambos. Em seguida, o mesmo processo LPAC deve ler a fonte autorizada e receber `ERROR_ACCESS_DENIED` ao abrir o canário externo, mesmo com a permissão de leitura do grupo `ALL APPLICATION PACKAGES` no canário. Falha de inicialização, arquivo ausente ou timeout fazem a sonda falhar. Opcionalmente, passe o caminho absoluto de um `codex.exe` após `--laplace-codex-boundary-probe` para executar `--version` sobre uma cópia da CLI no mesmo perfil offline.
+
+No Windows 10 x64 22H2 com GNU, a sonda retornou `LPAC: authorized read succeeded; external read denied`. Na execução com o binário instalado, o subprocesso também retornou `codex-cli 0.157.0`. O diagnóstico de `login status` no LPAC recebeu acesso negado ao resolver `CODEX_HOME`. O modo `verified_isolated` continua bloqueado até integrar uma fronteira à CLI e concluir uma consulta autenticada com dados fictícios sob a mesma política. A validação MSVC hospedada continua pendente.
+
+A sonda original da CLI pode ser executada separadamente. Ela usa um `CODEX_HOME` descartável e dados fictícios.
 
 ```powershell
 $cli = (Get-Command codex.exe -CommandType Application | Select-Object -First 1).Source
@@ -268,3 +276,49 @@ node scripts/probe-codex-read.mjs $cli
 ```
 
 `pnpm test` usa processos fictícios para o fluxo de autorização, materialização, JSONL e encerramento. O smoke do NSIS também valida a preparação de um trecho histórico pelo sidecar instalado. Esses testes funcionam sem conta Codex e sem envio ao provedor.
+
+## Histórico de consultas e citações (C04)
+
+Em **Contexto**, abra uma captura e expanda **Histórico da captura** em **Consultar com Codex**. As consultas que chegam a um estado terminal são gravadas no catálogo SQLite local (migração v5), com a pergunta, o manifesto autorizado e os eventos da execução. O histórico reabre offline e conserva a identificação de consultas simuladas. Se o processo for encerrado abruptamente durante uma consulta, a tentativa em andamento pode ser perdida.
+
+Quando uma resposta contém uma referência como `[source-1]`, o Laplace procura o ID na seleção daquela execução e confere os hashes da captura e dos bytes preservados. **Abrir fonte verificada** mostra o arquivo histórico ou apenas o intervalo de bytes autorizado. A interface sinaliza IDs ausentes da seleção, fontes indisponíveis e respostas sem citações. A verificação identifica a origem dos bytes citados.
+
+## Tarefas do projeto (O01)
+
+Abra **Tarefas** no projeto, escreva um título e salve. O objetivo é opcional na interface e começa com o título quando fica vazio. Uma tarefa salva pode ser reaberta e editada. A migração 6 do catálogo guarda as tarefas por projeto, com revisão para detectar edições concorrentes.
+
+Em uma consulta concluída no histórico, **Criar tarefa desta consulta** abre o rascunho com a pergunta no objetivo. O Laplace mantém o vínculo à consulta e à captura de origem no catálogo. Os arquivos preservados são compartilhados com o histórico existente.
+
+## Execuções de tarefas (O02)
+
+No modo Mock de desenvolvimento, abra uma tarefa salva e selecione **Executar simulação**. O supervisor grava a tentativa e a revisão da tarefa antes de começar, permite uma tentativa ativa por catálogo e salva os eventos em ordem. Sair da aba ou trocar de projeto preserva o acompanhamento. **Cancelar execução** registra o pedido e aguarda o encerramento pelo supervisor.
+
+A migração 7 guarda as tentativas e seus eventos. A mesma chave de solicitação recupera a tentativa original. Se o sidecar cair, a próxima leitura registra a interrupção e conserva os eventos recebidos. O histórico fica acessível no catálogo local. Novas execuções nesta etapa usam o Mock de desenvolvimento.
+
+## Resultado da simulação (O03)
+
+Uma simulação concluída grava um arquivo fictício em uma pasta temporária, captura as versões antes e depois e descarta a pasta. Abra **Resultado da simulação** na execução para inspecionar o diff ou expandir **Ver conteúdo completo**. A migração 8 preserva o resultado e o encerramento na mesma transação. O Laplace verifica os hashes ao reabrir o diff offline. Tentativas canceladas, interrompidas ou anteriores à migração podem aparecer sem diff.
+
+O clone cadastrado permanece intacto. O aceite com uma alteração real do agente depende da integração confinada do C03.
+
+## Alterações Git (G01)
+
+Em **Alterações Git**, selecione os caminhos que deseja preservar, incluindo arquivos novos do disco. **Capturar alterações** guarda os bytes de texto selecionados do HEAD, do índice e do disco (migração 9). As comparações **HEAD → Índice** e **Índice → Disco** usam a última captura preservada, inclusive após reiniciar. Uma exclusão mantém o conteúdo anterior, um renome identifica o caminho de origem e um conflito mostra os estágios do índice. Binários, submódulos e arquivos acima do limite aparecem como metadados quando disponíveis.
+
+A captura verifica se a base Git e os bytes selecionados continuam consistentes antes de salvar. Ela usa a política de caminhos da captura de contexto e lê objetos Git sem filtros externos. Cada comparação textual aceita até 12 KiB por versão.
+
+## Revisão do diff simulado (G02)
+
+Em uma execução concluída, **Aprovar diff** ou **Recusar diff** registra uma decisão vinculada ao digest do artefato de simulação e aos bytes preservados. A migração 10 conserva as decisões por revisão. A decisão reaparece após reiniciar. A aplicação de uma alteração real ao checkout continua pendente de um resultado confinado e de validação do mecanismo de aplicação e recuperação.
+
+## Estado do roadmap
+
+| Marco            | Entrega atual                                                               | Aceite pendente                                                                    |
+| ---------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| D01–D07, C01–C02 | Fundação desktop, catálogo, contexto preservado e busca FTS5                | —                                                                                  |
+| C03              | Modos de desenvolvimento, autorização, eventos JSONL e sonda LPAC offline   | Consulta real autenticada no perfil confinado                                      |
+| C04, O01         | Histórico e citações verificáveis. Tarefas diretas ou vinculadas à consulta | —                                                                                  |
+| O02–O03          | Supervisor persistente, cancelamento e diff reaberto offline em modo Mock   | Executar e inspecionar uma edição real em confinamento                             |
+| G01              | Captura e comparação de HEAD, índice e disco                                | —                                                                                  |
+| G02              | Evidência do diff simulado e decisão versionada                             | Revalidar base, aplicar com consentimento e reconciliar uma aplicação interrompida |
+| G03, M01, B01    | Planejados                                                                  | Clone GitHub, fila e worktrees, resumo e validação da beta em ambiente limpo       |

@@ -42,7 +42,7 @@ test("mock emits the C03 lifecycle with deterministic, synthetic messages and fa
           events.find((event) => event.type === "message"),
           {
             type: "message",
-            text: "Resposta simulada. Fonte fictícia: trecho de exemplo.",
+            text: "Resposta simulada. Citação fictícia [source-1].",
           },
         );
       } else {
