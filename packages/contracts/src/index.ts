@@ -22,6 +22,7 @@ export const errorCodes = [
   "project_identity_mismatch",
   "project_identity_unknown",
   "project_already_registered",
+  "project_identity_ambiguous",
   "catalog_unavailable",
   "dialog_failed",
   "service_unavailable",
@@ -52,6 +53,11 @@ export const errorCodes = [
   "working_unavailable",
   "working_conflict",
   "result_review_conflict",
+  "decision_unavailable",
+  "decision_conflict",
+  "decision_authorization_required",
+  "decision_purge_pending",
+  "resume_stale",
   "clone_unavailable",
   "clone_busy",
   ...cloneFailures,
@@ -96,6 +102,8 @@ export type Results = ContextResults &
   TaskResultResults &
   WorkingResults &
   ReviewResults &
+  ResumeResults &
+  DecisionResults &
   CloneResults & {
     health: Health;
     "workspace.list": Catalog;
@@ -120,6 +128,8 @@ export type Request = Envelope &
     | TaskResultRequests
     | WorkingRequests
     | ReviewRequests
+    | ResumeRequests
+    | DecisionRequests
     | CloneRequests
   );
 export type Response<K extends Operation = Operation> =
@@ -167,6 +177,10 @@ export function parseRequest(value: unknown): Request | undefined {
   if (working) return { ...envelope, ...working };
   const review = parseReviewRequest(value);
   if (review) return { ...envelope, ...review };
+  const resume = parseResumeRequest(value);
+  if (resume) return { ...envelope, ...resume };
+  const decision = parseDecisionRequest(value);
+  if (decision) return { ...envelope, ...decision };
   if (value.operation === "health") return { ...envelope, operation: "health" };
   if (value.operation === "workspace.list")
     return { ...envelope, operation: "workspace.list" };
@@ -299,6 +313,17 @@ export function isResponse<K extends Operation>(
     return isWorkingResult(operation, value.data);
   if (operation === "result.review" || operation === "result.reviewStatus")
     return isReviewResult(operation, value.data);
+  if (operation === "project.identity" || operation === "project.resume")
+    return isResumeResult(operation, value.data);
+  if (
+    operation === "decision.evidenceResolve" ||
+    operation === "decision.comparePresent" ||
+    operation === "decision.record" ||
+    operation === "decision.list" ||
+    operation === "decision.get" ||
+    operation === "decision.purge"
+  )
+    return isDecisionResult(operation, value.data);
   if (
     operation === "codex.status" ||
     operation === "codex.prepare" ||
@@ -386,3 +411,17 @@ import {
   type CloneResults,
 } from "./clone.ts";
 export * from "./clone.ts";
+import {
+  isResumeResult,
+  parseResumeRequest,
+  type ResumeRequests,
+  type ResumeResults,
+} from "./resume.ts";
+export * from "./resume.ts";
+import {
+  isDecisionResult,
+  parseDecisionRequest,
+  type DecisionRequests,
+  type DecisionResults,
+} from "./decisions.ts";
+export * from "./decisions.ts";

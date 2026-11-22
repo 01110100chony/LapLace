@@ -2,7 +2,7 @@ import { constants, realpath } from "node:fs";
 import { createHash } from "node:crypto";
 import { access, stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
-import { basename, delimiter, isAbsolute, join } from "node:path";
+import { basename, delimiter, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import {
   gitSource,
@@ -40,6 +40,10 @@ type GitOptions = {
 export type RepositoryInspection = Omit<ProjectRecord, "id"> &
   GitObservation & {
     identity: string;
+    gitDir: string;
+    commonGitDir: string;
+    commonGitIdentity: string;
+    isLinkedWorktree: boolean;
   };
 
 function isMissing(error: NodeJS.ErrnoException) {
@@ -273,26 +277,45 @@ async function repositoryReader(path: string, options: GitOptions) {
     throw new GitError("project_unavailable");
 
   async function checkoutLocation() {
-    const gitDir = await folder(
-      (await run(root, ["rev-parse", "--absolute-git-dir"])).replace(
-        /\r?\n$/,
-        "",
+    const [rawGitDir, rawCommonDir] = await Promise.all([
+      run(root, ["rev-parse", "--absolute-git-dir"]),
+      run(root, ["rev-parse", "--git-common-dir"]),
+    ]);
+    const cleanedCommon = rawCommonDir.replace(/\r?\n$/, "");
+    const [gitDir, commonGitDir] = await Promise.all([
+      folder(rawGitDir.replace(/\r?\n$/, "")),
+      folder(
+        isAbsolute(cleanedCommon)
+          ? cleanedCommon
+          : resolve(root, cleanedCommon),
       ),
-    );
+    ]);
     try {
       const locations = await Promise.all(
-        [root, gitDir].map((location) => stat(location, { bigint: true })),
+        [root, gitDir, commonGitDir].map((location) =>
+          stat(location, { bigint: true }),
+        ),
       );
       // Directory IDs survive a rename and distinguish clones, including linked
       // worktrees. Git commit IDs alone cannot distinguish two copies.
       if (locations.some((entry) => !entry.isDirectory() || entry.ino === 0n))
         throw new GitError("project_identity_unknown");
-      const identity = locations
-        .map(({ dev, ino }) => `${dev}:${ino}`)
-        .join("/");
+      const [rootStat, gitStat, commonStat] = locations as [
+        NonNullable<(typeof locations)[number]>,
+        NonNullable<(typeof locations)[number]>,
+        NonNullable<(typeof locations)[number]>,
+      ];
+      const identity = `${rootStat.dev}:${rootStat.ino}/${gitStat.dev}:${gitStat.ino}`;
+      const commonGitIdentity = `${commonStat.dev}:${commonStat.ino}`;
       if (options.expectedIdentity && options.expectedIdentity !== identity)
         throw new GitError("project_identity_mismatch");
-      return { gitDir, identity };
+      return {
+        gitDir,
+        commonGitDir,
+        identity,
+        commonGitIdentity,
+        isLinkedWorktree: gitDir !== commonGitDir,
+      };
     } catch (error) {
       if (error instanceof GitError) throw error;
       if (isMissing(error as NodeJS.ErrnoException))
@@ -357,14 +380,28 @@ export async function inspectRepository(
 ): Promise<RepositoryInspection> {
   const repo = await repositoryReader(path, options);
   const { root, checkoutLocation } = repo;
-  const { identity } = await checkoutLocation();
+  const {
+    identity,
+    gitDir,
+    commonGitDir,
+    commonGitIdentity,
+    isLinkedWorktree,
+  } = await checkoutLocation();
   const status = await checkoutStatus(repo);
-  if ((await checkoutLocation()).identity !== identity)
+  const confirmed = await checkoutLocation();
+  if (
+    confirmed.identity !== identity ||
+    confirmed.commonGitIdentity !== commonGitIdentity
+  )
     throw new GitError("project_identity_mismatch");
   return {
     name: basename(root) || root,
     root,
     identity,
+    gitDir,
+    commonGitDir,
+    commonGitIdentity,
+    isLinkedWorktree,
     ...status,
     source: gitSource,
     summaryVersion: gitSummaryVersion,

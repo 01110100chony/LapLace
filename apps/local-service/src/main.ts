@@ -18,6 +18,7 @@ import { GitHubClones, runGitHubClone } from "./github-clone.ts";
 import { CodexQueries, prepareCodex, type CodexDevelopment } from "./codex.ts";
 import { TaskSupervisor } from "./task-supervisor.ts";
 import { captureWorkingTree, listWorkingTree } from "./working-tree.ts";
+import { createResumeService } from "./resume-service.ts";
 
 // Defined when the sidecar is bundled. The source entry point and the
 // distribution bundle ignore all development arguments.
@@ -62,6 +63,7 @@ const contextExclusions = (process.env.LAPLACE_CONTEXT_EXCLUDES ?? "")
   .split(";")
   .filter(isContextPath);
 let catalog: ReturnType<typeof openCatalog> | undefined;
+let selectionGeneration = 0;
 
 class CatalogError extends Error {}
 
@@ -84,6 +86,12 @@ function contextOptions(projectId: string) {
   protectedRoots.push(dataDir);
   return { signal: exit.signal, protectedRoots, exclusions: contextExclusions };
 }
+
+const resumeService = createResumeService({
+  withCatalog,
+  contextOptions,
+  getSelectionGeneration: () => selectionGeneration,
+});
 
 async function respond(line: string): Promise<Response> {
   let value: unknown;
@@ -115,6 +123,7 @@ async function respond(line: string): Promise<Response> {
       return { ...envelope, operation: request.operation, ok: true, data };
     }
     if (request.operation === "workspace.addLocal") {
+      selectionGeneration++;
       const inspection = await inspectRepository(request.path, {
         signal: exit.signal,
       });
@@ -122,6 +131,7 @@ async function respond(line: string): Promise<Response> {
       return { ...envelope, operation: request.operation, ok: true, data };
     }
     if (request.operation === "project.select") {
+      selectionGeneration++;
       const data = withCatalog((store) => store.select(request.projectId));
       return { ...envelope, operation: request.operation, ok: true, data };
     }
@@ -133,9 +143,10 @@ async function respond(line: string): Promise<Response> {
     if (request.operation === "clone.start") {
       if (exit.signal.aborted) throw new GitError("clone_unavailable");
       withCatalog(() => undefined);
-      const data = clones.start(request.grantId, (inspection) =>
-        withCatalog((store) => store.add(inspection)),
-      );
+      const data = clones.start(request.grantId, (inspection) => {
+        selectionGeneration++;
+        return withCatalog((store) => store.add(inspection));
+      });
       return { ...envelope, operation: request.operation, ok: true, data };
     }
     if (
@@ -146,6 +157,77 @@ async function respond(line: string): Promise<Response> {
         request.operation === "clone.status"
           ? clones.status(request.cloneId)
           : clones.cancel(request.cloneId);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "decision.evidenceResolve") {
+      const scope = {
+        projectId: request.projectId,
+        bindingId: request.bindingId,
+        worktreeId: request.worktreeId,
+      };
+      const data = withCatalog((store) =>
+        store.evidence.resolve(scope, {
+          contextId: request.contextId,
+          path: request.path,
+          sha256: request.sha256,
+          chunk: request.chunk,
+        }),
+      );
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "decision.record") {
+      const data = withCatalog((store) => store.decisions.record(request));
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "decision.list") {
+      const scope = {
+        projectId: request.projectId,
+        bindingId: request.bindingId,
+        worktreeId: request.worktreeId,
+      };
+      const data = withCatalog((store) => store.decisions.list(scope));
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "decision.get") {
+      const scope = {
+        projectId: request.projectId,
+        bindingId: request.bindingId,
+        worktreeId: request.worktreeId,
+      };
+      const data = withCatalog((store) =>
+        store.decisions.get(scope, request.assertionId),
+      );
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "decision.purge") {
+      const data = withCatalog((store) => store.decisions.purge(request));
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "decision.comparePresent") {
+      const scope = {
+        projectId: request.projectId,
+        bindingId: request.bindingId,
+        worktreeId: request.worktreeId,
+      };
+      const data = await resumeService.comparePresent(scope, {
+        contextId: request.contextId,
+        path: request.path,
+        sha256: request.sha256,
+        chunk: request.chunk,
+      });
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "project.resume") {
+      const scope = {
+        projectId: request.projectId,
+        bindingId: request.bindingId,
+        worktreeId: request.worktreeId,
+      };
+      const data = await resumeService.resume(
+        scope,
+        request.correlationId,
+        exit.signal,
+      );
       return { ...envelope, operation: request.operation, ok: true, data };
     }
     const project = withCatalog((store) => store.lookup(request.projectId));
@@ -386,11 +468,30 @@ async function respond(line: string): Promise<Response> {
       }
     }
     if (request.operation === "project.relocate") {
+      selectionGeneration++;
       if (!project.identity) throw new GitError("project_identity_unknown");
       const inspection = await inspectRepository(request.path, {
         signal: exit.signal,
       });
       const data = withCatalog((store) => store.record(project, inspection));
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "project.identity") {
+      const targetPath = request.path ?? project.root;
+      const probe = await inspectRepository(targetPath, {
+        signal: exit.signal,
+        ...(request.path === undefined ? { expectedRoot: project.root } : {}),
+      })
+        .then((inspection) => ({ available: true as const, inspection }))
+        .catch((error: unknown) => {
+          if (error instanceof GitError) {
+            return { available: false as const };
+          }
+          throw error;
+        });
+      const data = withCatalog((store) =>
+        store.identity.resolve(project.id, probe, request.path !== undefined),
+      );
       return { ...envelope, operation: request.operation, ok: true, data };
     }
     const inspection = await inspectRepository(project.root, {

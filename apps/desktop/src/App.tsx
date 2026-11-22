@@ -3,7 +3,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   GitObservation,
   Project,
+  ProjectIdentityResult,
   ProjectRecord,
+  ResumeSummary,
 } from "@laplace/contracts";
 import { CloneDialog } from "./CloneDialog";
 import { AppTitleBar } from "./AppTitleBar";
@@ -15,14 +17,19 @@ import {
   type ProjectStatus,
   type ServiceStatus,
 } from "./views";
-import { createProjectLoader } from "./workspace";
+import { createResumeLoader } from "./workspace";
 
 const desktop = createDesktopClient(async (command, args) => {
   if (!isTauri()) throw new DesktopError("desktop_required");
   return invoke(command, args);
 });
 
-type Selection = { id: string; status: ProjectStatus };
+type Selection = {
+  id: string;
+  status: ProjectStatus;
+  identity: ProjectIdentityResult | null;
+  resume: ResumeSummary | null;
+};
 
 function updateProject(
   items: ProjectRecord[],
@@ -42,7 +49,7 @@ export function App() {
   const [selection, setSelection] = useState<Selection | null>(null);
   const [recentId, setRecentId] = useState<string>();
   const [service, setService] = useState<ServiceStatus>({ state: "loading" });
-  const [loader] = useState(() => createProjectLoader(desktop));
+  const [loader] = useState(() => createResumeLoader(desktop));
   const cloneDialog = useRef<HTMLDialogElement>(null);
   const importDialog = useRef<HTMLDialogElement>(null);
   const relocateDialog = useRef<HTMLDialogElement>(null);
@@ -55,7 +62,12 @@ export function App() {
   const inspect = useCallback(
     (project: ProjectRecord) => {
       setRecentId(project.id);
-      setSelection({ id: project.id, status: { state: "loading" } });
+      setSelection({
+        id: project.id,
+        status: { state: "loading" },
+        identity: null,
+        resume: null,
+      });
       void loader.open(
         project.id,
         (selected) => {
@@ -65,23 +77,48 @@ export function App() {
             [project.id]: selected.cached ?? undefined,
           }));
         },
-        (fresh) => {
-          setProjects((items) => updateProject(items, fresh));
-          setSummaries((items) => ({ ...items, [project.id]: fresh }));
-          setSelection({ id: project.id, status: { state: "ready" } });
+        (identity) => {
+          setSelection((prev) =>
+            prev && prev.id === project.id ? { ...prev, identity } : prev,
+          );
+        },
+        (resume) => {
+          setProjects((items) =>
+            updateProject(items, {
+              id: project.id,
+              name: project.name,
+              root: resume.root,
+            }),
+          );
+          setSummaries((items) => ({
+            ...items,
+            [project.id]: resume.observation.observation ?? undefined,
+          }));
+          setSelection((prev) =>
+            prev && prev.id === project.id
+              ? {
+                  ...prev,
+                  status: { state: "ready" },
+                  resume,
+                }
+              : prev,
+          );
         },
         (error) => {
-          setSelection({
+          setSelection((prev) => ({
             id: project.id,
+            identity: prev?.id === project.id ? prev.identity : null,
+            resume: prev?.id === project.id ? prev.resume : null,
             status: {
               state: "error",
               message: errorMessage(error),
               canRelocate:
                 error instanceof DesktopError &&
                 (error.code === "project_unavailable" ||
-                  error.code === "project_identity_mismatch"),
+                  error.code === "project_identity_mismatch" ||
+                  error.code === "project_identity_ambiguous"),
             },
-          });
+          }));
         },
       );
     },
@@ -124,12 +161,9 @@ export function App() {
   }
 
   function acceptProject(project: Project) {
-    loader.invalidate();
-    const { id } = project;
     setProjects((items) => updateProject(items, project));
-    setSummaries((items) => ({ ...items, [id]: project }));
-    setRecentId(project.id);
-    setSelection({ id: project.id, status: { state: "ready" } });
+    setSummaries((items) => ({ ...items, [project.id]: project }));
+    inspect(project);
     main.current?.focus();
   }
 
@@ -200,14 +234,21 @@ export function App() {
               key={active.id}
               project={active}
               summary={summaries[active.id]}
+              identity={selection.identity}
+              resume={selection.resume}
               status={selection.status}
               refresh={() => inspect(active)}
               relocate={() => relocateDialog.current?.showModal()}
+              confirmIdentity={() =>
+                loader.persist(() => desktop.inspect(active.id))
+              }
               contextClient={desktop.context}
               codexClient={desktop.codex}
               taskClient={desktop.task}
               executionClient={desktop.execution}
               workingClient={desktop.working}
+              decisionClient={desktop.decisions}
+              onResumeUpdated={() => inspect(active)}
             />
           ) : (
             <Home

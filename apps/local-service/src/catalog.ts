@@ -8,6 +8,7 @@ import {
   type GitObservation,
   type Project,
   type ProjectRecord,
+  type ResumeActivity,
   type SelectedProject,
 } from "@laplace/contracts";
 import { GitError, type RepositoryInspection } from "./git.ts";
@@ -29,6 +30,9 @@ import {
 } from "./task-result-store.ts";
 import { createWorkingStore, workingMigration } from "./working-store.ts";
 import { createResultReviewStore, reviewMigration } from "./result-review.ts";
+import { createIdentityStore, identityMigration } from "./identity-store.ts";
+import { createEvidenceAdapter } from "./evidence-adapter.ts";
+import { createDecisionStore, decisionMigration } from "./decision-store.ts";
 
 const migrations = [
   `CREATE TABLE projects (
@@ -58,7 +62,11 @@ const migrations = [
   taskResultMigration,
   workingMigration,
   reviewMigration,
+  identityMigration,
+  decisionMigration,
 ];
+
+export const catalogSchemaVersion = migrations.length;
 
 type RegisteredProject = ProjectRecord & { identity: string | null };
 
@@ -77,11 +85,28 @@ function readObservation(
   }
 }
 
+let savepointSequence = 0;
+
 function transaction<T>(
   database: DatabaseSync,
   run: () => T,
   mode: "read" | "write",
 ): T {
+  if (database.isTransaction) {
+    const name = `laplace_sp_${++savepointSequence}`;
+    database.exec(`SAVEPOINT ${name}`);
+    try {
+      const result = run();
+      database.exec(`RELEASE SAVEPOINT ${name}`);
+      return result;
+    } catch (error) {
+      if (database.isTransaction) {
+        database.exec(`ROLLBACK TO SAVEPOINT ${name}`);
+        database.exec(`RELEASE SAVEPOINT ${name}`);
+      }
+      throw error;
+    }
+  }
   database.exec(mode === "write" ? "BEGIN IMMEDIATE" : "BEGIN");
   try {
     const result = run();
@@ -152,6 +177,33 @@ export function openCatalog(dataDir: string) {
         root = excluded.root, git_identity = excluded.git_identity,
         observed_at = excluded.observed_at, payload = excluded.payload
     `);
+    const latestSnapshotActivity = database.prepare(`
+      SELECT
+        context_id AS contextId, head, completed_at AS completedAt,
+        status, included, omitted
+      FROM context_snapshots
+      WHERE project_id = ?
+      ORDER BY sequence DESC
+      LIMIT 1
+    `);
+    const latestExecutionActivity = database.prepare(`
+      SELECT
+        e.task_id AS taskId,
+        e.execution_id AS executionId,
+        e.mode,
+        e.state,
+        COALESCE(r.recorded_at, e.finished_at, e.started_at) AS recordedAt,
+        r.choice AS reviewChoice
+      FROM task_executions AS e
+      LEFT JOIN result_reviews AS r
+        ON r.execution_id = e.execution_id
+        AND r.revision = (
+          SELECT MAX(revision) FROM result_reviews WHERE execution_id = e.execution_id
+        )
+      WHERE e.project_id = ?
+      ORDER BY e.sequence DESC
+      LIMIT 1
+    `);
 
     function lookup(id: string): RegisteredProject {
       const project = byId.get(id) as RegisteredProject | undefined;
@@ -202,11 +254,26 @@ export function openCatalog(dataDir: string) {
     }
 
     const blobs = createCatalogBlobs(database);
+    const identity = createIdentityStore(database, write);
     const context = createContextStore(database, write, lookup, blobs);
+    const contextSearch = createContextSearch(database, context, read, write);
+    const evidence = createEvidenceAdapter(database, identity, contextSearch);
+    const decisions = createDecisionStore(
+      database,
+      dataDir,
+      write,
+      read,
+      identity,
+      evidence,
+    );
+    decisions.reconcileTombstones();
     const codexHistory = createCodexHistory(database, context);
     return {
+      identity,
       context,
-      contextSearch: createContextSearch(database, context, read, write),
+      contextSearch,
+      evidence,
+      decisions,
       codexHistory,
       tasks: createTaskStore(database, write, codexHistory),
       executions: createTaskExecutionStore(
@@ -227,29 +294,93 @@ export function openCatalog(dataDir: string) {
         };
       },
       add(inspection: RepositoryInspection): Project {
-        const { name, root, identity } = inspection;
+        const { name, root, identity: identityKey } = inspection;
         return write(() => {
           const existing = byRoot.get(root) as RegisteredProject | undefined;
-          if (!existing && byIdentity.get(identity))
+          if (!existing && byIdentity.get(identityKey))
             throw new GitError("project_already_registered");
           const project = existing ?? {
             id: randomBytes(32).toString("hex"),
             root,
             name,
-            identity,
+            identity: identityKey,
           };
-          if (!existing) insert.run(project.id, root, name, identity);
+          if (!existing) {
+            insert.run(project.id, root, name, identityKey);
+            identity.registerFromInspection(project, inspection);
+          } else {
+            identity.syncFromInspection(project.id, inspection);
+          }
           const result = save(project, inspection);
           setSelection.run(project.id);
           return result;
         });
       },
       lookup,
+      readCachedObservation(id: string): GitObservation | null {
+        const { root, identity: gitIdentity } = lookup(id);
+        if (!gitIdentity) return null;
+        const entry = cached.get(id, root, gitIdentity);
+        return readObservation(entry?.payload, entry?.observed_at);
+      },
+      readLatestActivity(
+        legacyProjectId: string,
+        logicalProjectId: string,
+      ): ResumeActivity {
+        return read(() => {
+          const snap = latestSnapshotActivity.get(legacyProjectId) as
+            | {
+                contextId: string;
+                head: string | null;
+                completedAt: string;
+                status: "complete" | "partial" | "invalidated";
+                included: number;
+                omitted: number;
+              }
+            | undefined;
+          const exec = latestExecutionActivity.get(legacyProjectId) as
+            | {
+                taskId: string;
+                executionId: string;
+                mode: string;
+                state: string;
+                recordedAt: string;
+                reviewChoice: "approved" | "rejected" | null;
+              }
+            | undefined;
+          return {
+            lastCapture: snap
+              ? {
+                  contextId: snap.contextId,
+                  projectId: logicalProjectId,
+                  head: snap.head,
+                  completedAt: snap.completedAt,
+                  status: snap.status,
+                  included: Number(snap.included),
+                  omitted: Number(snap.omitted),
+                }
+              : null,
+            lastExecution:
+              exec && exec.mode === "mock_development"
+                ? {
+                    taskId: exec.taskId,
+                    executionId: exec.executionId,
+                    projectId: logicalProjectId,
+                    mode: "mock_development",
+                    state: exec.state,
+                    recordedAt: exec.recordedAt,
+                    reviewChoice: exec.reviewChoice ?? null,
+                    isLegacyAttemptNote: true,
+                  }
+                : null,
+          };
+        });
+      },
       select(id: string): SelectedProject {
         return write(() => {
-          const { name, root, identity } = lookup(id);
+          const { name, root, identity: gitIdentity } = lookup(id);
           setSelection.run(id);
-          const entry = cached.get(id, root, identity);
+          const entry = cached.get(id, root, gitIdentity);
           return {
             id,
             name,
@@ -268,7 +399,9 @@ export function openCatalog(dataDir: string) {
             throw new GitError("project_unavailable");
           if (current.root !== inspection.root && byRoot.get(inspection.root))
             throw new GitError("project_already_registered");
-          return save(current, inspection);
+          const result = save(current, inspection);
+          identity.syncFromInspection(current.id, inspection);
+          return result;
         });
       },
       close() {

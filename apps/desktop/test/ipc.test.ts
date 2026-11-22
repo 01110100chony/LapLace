@@ -198,3 +198,264 @@ test("descarta busca atrasada ao trocar de projeto e rejeita prévia de outro tr
     },
   );
 });
+
+test("F1-T10.A1 e F1-T11: valida desktop.identity, desktop.resume e desktop.decisions e rejeita escopo/correlação incorretos", async () => {
+  const legacyProjectId = "1".repeat(64);
+  const scope = {
+    projectId: "a".repeat(64),
+    bindingId: "b".repeat(64),
+    worktreeId: "c".repeat(64),
+  };
+  const wrongBinding = "d".repeat(64);
+  const contextId = "e".repeat(64);
+  const sha256 = "f".repeat(64);
+  const assertionId = "2".repeat(64);
+  const revisionId = "3".repeat(64);
+  const tombstoneId = "4".repeat(64);
+  const now = "2026-11-22T06:00:00.000Z";
+
+  const verifiedEvidence = {
+    state: "verified",
+    coverage: "partial",
+    durability: "durable_blob",
+    sourceOrigin: "context_search",
+    capturedAt: now,
+    excerptDigest: sha256,
+    ref: {
+      projectId: scope.projectId,
+      contextId,
+      path: "src/retomada.ts",
+      sha256,
+      chunk: 0,
+    },
+    gap: null,
+  };
+  const decision = {
+    assertionId,
+    revisionId,
+    revision: 1,
+    projectId: scope.projectId,
+    content: "Decisão F1 validada no renderer IPC.",
+    author: "Operador",
+    authority: "human_local",
+    visibility: "local_only",
+    status: "active",
+    effectiveAt: now,
+    recordedAt: now,
+    sourceOrigin: "human_decision",
+    evidence: verifiedEvidence,
+  };
+
+  let injectWrongScope = false;
+  let injectWrongCorrelation = false;
+
+  const client = createDesktopClient(async (command, args) => {
+    assert.equal(command, "resume_request");
+    const id = args.id as string;
+    const req = args.request as Record<string, unknown>;
+    const op = req.operation as string;
+    const returnedScope = injectWrongScope
+      ? { ...scope, bindingId: wrongBinding }
+      : scope;
+
+    if (op === "project.identity") {
+      return {
+        version: protocolVersion,
+        id,
+        ok: true,
+        operation: op,
+        data: {
+          scope: returnedScope,
+          legacyProjectId,
+          root: "C:\\Repos\\A",
+          verification: "verified",
+          requiresConfirmation: false,
+          worktrees: [],
+          candidates: [],
+        },
+      };
+    }
+    if (op === "project.resume") {
+      return {
+        version: protocolVersion,
+        id,
+        ok: true,
+        operation: op,
+        data: {
+          scope: returnedScope,
+          projectName: "Projeto A",
+          root: "C:\\Repos\\A",
+          verification: "verified",
+          computedAt: now,
+          correlationId: injectWrongCorrelation
+            ? "wrong-corr"
+            : req.correlationId,
+          observation: {
+            state: "fresh",
+            observation: {
+              branch: "main",
+              head: null,
+              changes: { staged: 0, unstaged: 0, untracked: 0, conflicted: 0 },
+              observedAt: now,
+              source: "git.status",
+              summaryVersion: 1,
+            },
+            attemptedAt: now,
+            gap: null,
+          },
+          memory: { state: "available", decision, conflicts: [] },
+          activity: { lastCapture: null, lastExecution: null },
+          nextAction: {
+            advisory: true,
+            kind: "continue_from_decision",
+            label: "Retomar",
+            rationale: "Decisão ativa",
+            blockedByConflict: false,
+          },
+        },
+      };
+    }
+    if (op === "decision.record") {
+      return {
+        version: protocolVersion,
+        id,
+        ok: true,
+        operation: op,
+        data: decision,
+      };
+    }
+    if (op === "decision.evidenceResolve") {
+      return {
+        version: protocolVersion,
+        id,
+        ok: true,
+        operation: op,
+        data: {
+          scope: returnedScope,
+          evidence: verifiedEvidence,
+          excerpt: {
+            firstLine: 1,
+            lastLine: 1,
+            splitLine: false,
+            text: "export const ok = true;\n",
+            bytesLength: 24,
+            sha256,
+          },
+          snapshotStatus: "partial",
+          omittedPaths: [],
+          reindexedPreserved: true,
+        },
+      };
+    }
+    if (op === "decision.comparePresent") {
+      return {
+        version: protocolVersion,
+        id,
+        ok: true,
+        operation: op,
+        data: {
+          scope: returnedScope,
+          historical: {
+            scope: returnedScope,
+            evidence: verifiedEvidence,
+            excerpt: {
+              firstLine: 1,
+              lastLine: 1,
+              splitLine: false,
+              text: "export const ok = true;\n",
+              bytesLength: 24,
+              sha256,
+            },
+            snapshotStatus: "partial",
+            omittedPaths: [],
+            reindexedPreserved: true,
+          },
+          present: {
+            state: "available",
+            origin: "working_tree",
+            checkedAt: now,
+            path: "src/retomada.ts",
+            sha256,
+            text: "export const ok = true;\n",
+          },
+          comparison: "matches",
+        },
+      };
+    }
+    if (op === "decision.purge") {
+      return {
+        version: protocolVersion,
+        id,
+        ok: true,
+        operation: op,
+        data: {
+          scope: returnedScope,
+          assertionId,
+          purgedRevision: 1,
+          status: "purged",
+          purgedAt: now,
+          removed: { revisions: 1, evidenceLinks: 1, cacheEntriesCleared: 0 },
+          preservedSharedBlobs: true,
+          tombstoneId,
+          scopeBoundary: "f1_local_decisions_only",
+        },
+      };
+    }
+    assert.fail(`unexpected op: ${op}`);
+  });
+
+  const idRes = await client.identity(legacyProjectId);
+  assert.deepEqual(idRes.scope, scope);
+
+  const resumeRes = await client.resume(scope, "corr-42");
+  assert.equal(resumeRes.correlationId, "corr-42");
+
+  const recorded = await client.decisions.record({
+    ...scope,
+    requestId: "req-dec-1",
+    assertionId: null,
+    expectedRevision: 0,
+    content: decision.content,
+    author: decision.author,
+    reason: "Registro",
+    humanConfirmed: true,
+    evidence: { contextId, path: "src/retomada.ts", sha256, chunk: 0 },
+  });
+  assert.equal(recorded.assertionId, assertionId);
+
+  const resolved = await client.decisions.evidenceResolve(scope, {
+    contextId,
+    path: "src/retomada.ts",
+    sha256,
+    chunk: 0,
+  });
+  assert.equal(resolved.evidence.state, "verified");
+
+  const compared = await client.decisions.comparePresent(scope, {
+    contextId,
+    path: "src/retomada.ts",
+    sha256,
+    chunk: 0,
+  });
+  assert.equal(compared.comparison, "matches");
+
+  const purged = await client.decisions.purge({
+    ...scope,
+    assertionId,
+    expectedRevision: 1,
+    confirmedScope: true,
+    reason: "Expurgo UI",
+  });
+  assert.equal(purged.status, "purged");
+
+  injectWrongScope = true;
+  await assert.rejects(client.resume(scope, "corr-42"), {
+    code: "invalid_response",
+  });
+  injectWrongScope = false;
+
+  injectWrongCorrelation = true;
+  await assert.rejects(client.resume(scope, "corr-42"), {
+    code: "invalid_response",
+  });
+});

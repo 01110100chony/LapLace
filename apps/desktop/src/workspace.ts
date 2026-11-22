@@ -1,4 +1,10 @@
-import type { Project, SelectedProject } from "@laplace/contracts";
+import type {
+  IdentityScope,
+  Project,
+  ProjectIdentityResult,
+  ResumeSummary,
+  SelectedProject,
+} from "@laplace/contracts";
 
 export function createLatestRequest() {
   let revision = 0;
@@ -59,6 +65,56 @@ export function createProjectLoader(client: {
         },
         (project) => {
           if (project) onFresh(project);
+        },
+        onError,
+      );
+    },
+  };
+}
+
+export function createResumeLoader(client: {
+  select: (id: string) => Promise<SelectedProject>;
+  identity: (id: string) => Promise<ProjectIdentityResult>;
+  resume: (
+    scope: IdentityScope,
+    correlationId?: string,
+  ) => Promise<ResumeSummary>;
+}) {
+  const latest = createLatestRequest();
+  let selectionQueue: Promise<unknown> = Promise.resolve();
+  let sequence = 0;
+
+  function persist<T>(write: () => Promise<T>) {
+    const turn = selectionQueue.then(write);
+    selectionQueue = turn.catch(() => {});
+    return turn;
+  }
+
+  return {
+    persist,
+    invalidate: latest.invalidate,
+    open(
+      legacyProjectId: string,
+      onSelected: (selected: SelectedProject) => void,
+      onIdentity: (identity: ProjectIdentityResult) => void,
+      onResume: (summary: ResumeSummary) => void,
+      onError: (error: unknown) => void,
+    ) {
+      const correlationId = `resume-${++sequence}`;
+      return latest.run(
+        async (isCurrent) => {
+          const selected = await persist(() => client.select(legacyProjectId));
+          if (!isCurrent()) return;
+          onSelected(selected);
+          const identity = await client.identity(legacyProjectId);
+          if (!isCurrent()) return;
+          onIdentity(identity);
+          const summary = await client.resume(identity.scope, correlationId);
+          if (!isCurrent()) return;
+          return summary;
+        },
+        (summary) => {
+          if (summary) onResume(summary);
         },
         onError,
       );

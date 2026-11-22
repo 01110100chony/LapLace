@@ -1,28 +1,21 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { once } from "node:events";
 import { readFileSync, readdirSync, realpathSync } from "node:fs";
 import {
   cp,
-  mkdtemp,
   mkdir,
   rename,
   readFile,
   stat,
   unlink,
-  rm,
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
 import { DatabaseSync } from "node:sqlite";
 import { setTimeout as delay } from "node:timers/promises";
-import { test, type TestContext } from "node:test";
-import { fileURLToPath } from "node:url";
+import { test } from "node:test";
 import {
-  isResponse,
   contextSearchPageSize,
   maxContextQueryBytes,
   maxContextSearchOffset,
@@ -30,132 +23,23 @@ import {
   protocolVersion,
   type CodexEvent,
   type CodexMode,
-  type Operation,
-  type Results,
   type TaskRunEvent,
 } from "@laplace/contracts";
 
 import { sha256 } from "../src/context.ts";
 import { openCatalog } from "../src/catalog.ts";
 import { CodexQueries, prepareCodex } from "../src/codex.ts";
+import { fixture, git } from "./fixtures/ipc-harness.ts";
 
-const entry = fileURLToPath(new URL("../src/main.ts", import.meta.url));
-const dropTaskResultSchema =
-  "DROP TABLE result_reviews; DROP TABLE working_blobs; DROP TABLE working_snapshots; DROP TABLE task_result_files; DROP TABLE task_results;";
+const dropIdentitySchema =
+  "DROP TABLE decision_purge_tombstones; DROP TABLE decision_evidence_links; DROP TABLE decision_revisions; DROP TABLE decisions; DROP TABLE worktrees; DROP TABLE local_repo_bindings; DROP TABLE logical_projects;";
+const dropTaskResultSchema = `${dropIdentitySchema} DROP TABLE result_reviews; DROP TABLE working_blobs; DROP TABLE working_snapshots; DROP TABLE task_result_files; DROP TABLE task_results;`;
 const dropExecutionSchema = `
   ${dropTaskResultSchema}
   DROP TABLE task_execution_events;
   DROP TABLE task_executions;
   DROP INDEX tasks_project_task;
 `;
-
-async function fixture(t: TestContext) {
-  const root = await mkdtemp(join(tmpdir(), "laplace-ipc-"));
-  const dataDir = join(root, "dados do aplicativo");
-  const stores = new Set<() => Promise<unknown>>();
-  t.after(async () => {
-    await Promise.all([...stores].map((stop) => stop()));
-    await rm(root, { recursive: true, force: true });
-  });
-
-  return {
-    root,
-    dataDir,
-    database: join(dataDir, "catalog.sqlite3"),
-    start(path = dataDir, mock?: "completed" | "cancel") {
-      // Exercise the sidecar's development argument gate without bundling it in the test.
-      const args = mock
-        ? [
-            "--import",
-            "data:text/javascript,globalThis.__LAPLACE_DEVELOPMENT__=true",
-            entry,
-            path,
-            "--codex-mock",
-            mock,
-          ]
-        : [entry, path];
-      const child = spawn(process.execPath, args, {
-        windowsHide: true,
-        stdio: ["pipe", "pipe", "inherit"],
-      });
-      const closed = once(child, "close");
-      const lines = createInterface({ input: child.stdout })[
-        Symbol.asyncIterator
-      ]();
-      const stop = () => {
-        if (child.exitCode === null) child.kill();
-        return closed;
-      };
-      stores.add(stop);
-      let sequence = 0;
-      return {
-        async exchange(value: object): Promise<unknown> {
-          child.stdin.write(JSON.stringify(value) + "\n");
-          return JSON.parse((await lines.next()).value ?? "null");
-        },
-        async request<K extends Operation>(
-          operation: K,
-          args: Record<string, unknown> = {},
-        ): Promise<Results[K]> {
-          const id = `request-${++sequence}`;
-          const response = await this.exchange({
-            version: protocolVersion,
-            id,
-            operation,
-            ...args,
-          });
-          assert.ok(
-            isResponse(response, id, operation),
-            JSON.stringify(response),
-          );
-          if (!response.ok) throw new Error(response.error.code);
-          return response.data;
-        },
-        async close() {
-          child.stdin.end();
-          assert.deepEqual(await closed, [0, null]);
-          stores.delete(stop);
-        },
-        async crash() {
-          await stop();
-          stores.delete(stop);
-        },
-      };
-    },
-    async repository(name: string) {
-      const path = join(root, name);
-      await mkdir(path);
-      git(path, "init", "--quiet", "-b", "main");
-      return path;
-    },
-  };
-}
-
-function git(path: string, ...args: string[]) {
-  return execFileSync(
-    "git",
-    [
-      "-C",
-      path,
-      "-c",
-      "user.name=Laplace Test",
-      "-c",
-      "user.email=test@example.invalid",
-      "-c",
-      "commit.gpgSign=false",
-      ...args,
-    ],
-    {
-      encoding: "utf8",
-      windowsHide: true,
-      env: {
-        ...process.env,
-        GIT_CONFIG_NOSYSTEM: "1",
-        GIT_CONFIG_GLOBAL: process.platform === "win32" ? "NUL" : "/dev/null",
-      },
-    },
-  ).trim();
-}
 
 test(
   "migra C04 e O01, reabre a consulta offline e vincula tarefas somente à origem do projeto",
@@ -391,7 +275,7 @@ test(
       using database = new DatabaseSync(env.database);
       assert.equal(
         database.prepare("PRAGMA user_version").get()?.user_version,
-        10,
+        12,
       );
       for (const table of ["context_snapshots", "codex_history", "tasks"]) {
         assert.equal(
@@ -654,7 +538,9 @@ test(
     await writeFile(sourceFile, "Edição posterior do usuário.\n");
     {
       using database = new DatabaseSync(env.database);
-      database.exec("DROP TABLE result_reviews; PRAGMA user_version = 9");
+      database.exec(
+        `${dropIdentitySchema} DROP TABLE result_reviews; PRAGMA user_version = 9`,
+      );
     }
 
     const offline = env.start();
@@ -949,7 +835,7 @@ test(
     try {
       assert.equal(
         database.prepare("PRAGMA user_version").get()?.user_version,
-        10,
+        12,
       );
     } finally {
       database.close();
@@ -1342,7 +1228,7 @@ test(
 
     const database = new DatabaseSync(env.database);
     try {
-      database.exec("PRAGMA user_version = 11");
+      database.exec("PRAGMA user_version = 13");
       const second = env.start();
       await assert.rejects(second.request("workspace.list"), {
         message: "catalog_unavailable",
@@ -1350,9 +1236,9 @@ test(
       await second.close();
       assert.equal(
         database.prepare("PRAGMA user_version").get()?.user_version,
-        11,
+        13,
       );
-      database.exec("PRAGMA user_version = 10");
+      database.exec("PRAGMA user_version = 12");
     } finally {
       database.close();
     }
@@ -1422,7 +1308,7 @@ test(
     );
     assert.equal(
       database.prepare("PRAGMA user_version").get()?.user_version,
-      10,
+      12,
     );
     assert.equal(
       database

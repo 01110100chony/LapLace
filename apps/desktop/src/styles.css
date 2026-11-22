@@ -1112,3 +1112,125 @@ h1 {
 .clone-path {
   overflow-wrap: anywhere;
 }
+
+.cockpit-stack {
+  display: grid;
+  gap: 16px;
+}
+
+.cockpit-header-meta,
+.cockpit-actions,
+.cockpit-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--rule);
+  background: var(--raised);
+  color: var(--sub);
+  font-size: 12px;
+}
+
+.badge.verified,
+.badge.fresh {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.badge.cached,
+.badge.advisory,
+.badge.warning,
+.badge.unverified_legacy,
+.badge.ambiguous {
+  border-color: var(--yellow);
+  color: var(--yellow);
+}
+
+.badge.error,
+.badge.divergent,
+.badge.unavailable {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.cockpit-decision-body {
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--rule);
+  background: var(--raised);
+  white-space: pre-wrap;
+}
+
+.cockpit-conflicts {
+  display: grid;
+  gap: 8px;
+}
+
+.cockpit-conflict-item {
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--yellow);
+  background: var(--soft);
+}
+
+.cockpit-conflict-item.blocking {
+  border-color: var(--red);
+}
+
+.cockpit-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--rule);
+}
+
+.cockpit-field {
+  display: grid;
+  gap: 4px;
+}
+
+.cockpit-field input,
+.cockpit-field textarea,
+.cockpit-field select {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--rule);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.cockpit-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--sub);
+}
+
+.cockpit-evidence-box {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid var(--rule);
+  background: var(--bg);
+}
+
+.cockpit-excerpt {
+  margin: 0;
+  padding: 10px;
+  border-radius: 4px;
+  background: var(--side);
+  font-family: var(--mono);
+  font-size: 12px;
+  overflow-x: auto;
+}

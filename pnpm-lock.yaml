@@ -72,14 +72,23 @@ importers:
       '@laplace/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@laplace/core':
+        specifier: workspace:*
+        version: link:../../packages/core
 
   packages/agents:
     dependencies:
       '@laplace/contracts':
         specifier: workspace:*
-        version: link:../../packages/contracts
+        version: link:../contracts
 
   packages/contracts: {}
+
+  packages/core:
+    dependencies:
+      '@laplace/contracts':
+        specifier: workspace:*
+        version: link:../contracts
 
 packages:
 

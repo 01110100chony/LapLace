@@ -31,6 +31,7 @@ pub enum ErrorCode {
     ProjectIdentityMismatch,
     ProjectIdentityUnknown,
     ProjectAlreadyRegistered,
+    ProjectIdentityAmbiguous,
     CatalogUnavailable,
     DialogFailed,
     ServiceUnavailable,
@@ -60,6 +61,11 @@ pub enum ErrorCode {
     WorkingUnavailable,
     WorkingConflict,
     ResultReviewConflict,
+    DecisionUnavailable,
+    DecisionConflict,
+    DecisionAuthorizationRequired,
+    DecisionPurgePending,
+    ResumeStale,
     CloneUnavailable,
     CloneBusy,
     CloneDestinationExists,
@@ -130,6 +136,39 @@ struct SelectedProject {
     #[serde(flatten)]
     record: ProjectRecord,
     cached: Option<GitObservation>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IdentityScopeDto {
+    project_id: String,
+    binding_id: String,
+    worktree_id: String,
+}
+
+impl IdentityScopeDto {
+    fn valid(&self) -> bool {
+        valid_project_id(&self.project_id)
+            && valid_project_id(&self.binding_id)
+            && valid_project_id(&self.worktree_id)
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ScopePayload {
+    scope: IdentityScopeDto,
+    #[serde(flatten)]
+    data: serde_json::Map<String, serde_json::Value>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectIdentityPayload {
+    scope: IdentityScopeDto,
+    legacy_project_id: String,
+    #[serde(flatten)]
+    data: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -262,6 +301,22 @@ enum Payload {
     ResultReviewStatus(ContextPayload),
     #[serde(rename = "result.review")]
     ResultReview(ContextPayload),
+    #[serde(rename = "project.identity")]
+    ProjectIdentity(ProjectIdentityPayload),
+    #[serde(rename = "project.resume")]
+    ProjectResume(ScopePayload),
+    #[serde(rename = "decision.evidenceResolve")]
+    DecisionEvidenceResolve(ScopePayload),
+    #[serde(rename = "decision.comparePresent")]
+    DecisionComparePresent(ScopePayload),
+    #[serde(rename = "decision.record")]
+    DecisionRecord(ContextPayload),
+    #[serde(rename = "decision.list")]
+    DecisionList(ScopePayload),
+    #[serde(rename = "decision.get")]
+    DecisionGet(ScopePayload),
+    #[serde(rename = "decision.purge")]
+    DecisionPurge(ScopePayload),
 }
 
 impl Payload {
@@ -309,6 +364,14 @@ impl Payload {
             Self::WorkingCompare(_) => "working.compare",
             Self::ResultReviewStatus(_) => "result.reviewStatus",
             Self::ResultReview(_) => "result.review",
+            Self::ProjectIdentity(_) => "project.identity",
+            Self::ProjectResume(_) => "project.resume",
+            Self::DecisionEvidenceResolve(_) => "decision.evidenceResolve",
+            Self::DecisionComparePresent(_) => "decision.comparePresent",
+            Self::DecisionRecord(_) => "decision.record",
+            Self::DecisionList(_) => "decision.list",
+            Self::DecisionGet(_) => "decision.get",
+            Self::DecisionPurge(_) => "decision.purge",
         }
     }
 
@@ -353,9 +416,19 @@ impl Payload {
             | Self::WorkingCapture(data)
             | Self::WorkingCompare(data)
             | Self::ResultReviewStatus(data)
-            | Self::ResultReview(data) => {
+            | Self::ResultReview(data)
+            | Self::DecisionRecord(data) => {
                 valid_project_id(&data.project_id) && data.context_id.is_none()
             }
+            Self::ProjectIdentity(data) => {
+                data.scope.valid() && valid_project_id(&data.legacy_project_id)
+            }
+            Self::ProjectResume(data)
+            | Self::DecisionEvidenceResolve(data)
+            | Self::DecisionComparePresent(data)
+            | Self::DecisionList(data)
+            | Self::DecisionGet(data)
+            | Self::DecisionPurge(data) => data.scope.valid(),
             Self::ContextSearch(data) => {
                 valid_project_id(&data.project_id)
                     && data.context_id.as_deref().is_none_or(valid_project_id)
@@ -433,50 +506,72 @@ impl Response {
                 Body::Success { ok: true, payload } => {
                     payload.operation() == operation.name()
                         && payload.valid()
-                        && operation.project_id().is_none_or(|id| match payload {
-                            Payload::Select(project) => project.record.id == id,
-                            Payload::Inspect(project) | Payload::Relocate(project) => {
-                                project.record.id == id
+                        && match (operation.scope(), payload) {
+                            (
+                                Some((pid, bid, wid)),
+                                Payload::ProjectResume(data)
+                                | Payload::DecisionEvidenceResolve(data)
+                                | Payload::DecisionComparePresent(data)
+                                | Payload::DecisionList(data)
+                                | Payload::DecisionGet(data)
+                                | Payload::DecisionPurge(data),
+                            ) => {
+                                data.scope.project_id == pid
+                                    && data.scope.binding_id == bid
+                                    && data.scope.worktree_id == wid
                             }
-                            Payload::ContextBrowse(data)
-                            | Payload::ContextCapture(data)
-                            | Payload::ContextList(data)
-                            | Payload::ContextGet(data)
-                            | Payload::ContextValidate(data)
-                            | Payload::ContextIndexStatus(data)
-                            | Payload::ContextIndex(data)
-                            | Payload::ContextSearch(data)
-                            | Payload::ContextSourcePreview(data)
-                            | Payload::CodexStatus(data)
-                            | Payload::CodexPrepare(data)
-                            | Payload::CodexApproval(data)
-                            | Payload::CodexStart(data)
-                            | Payload::CodexEvents(data)
-                            | Payload::CodexCancel(data)
-                            | Payload::CodexHistory(data)
-                            | Payload::CodexCitation(data)
-                            | Payload::TaskList(data)
-                            | Payload::TaskCreate(data)
-                            | Payload::TaskUpdate(data)
-                            | Payload::TaskStart(data)
-                            | Payload::ExecutionLatest(data)
-                            | Payload::ExecutionEvents(data)
-                            | Payload::ExecutionCancel(data)
-                            | Payload::ExecutionResult(data)
-                            | Payload::ExecutionChange(data)
-                            | Payload::WorkingList(data)
-                            | Payload::WorkingLatest(data)
-                            | Payload::WorkingCapture(data)
-                            | Payload::WorkingCompare(data)
-                            | Payload::ResultReviewStatus(data)
-                            | Payload::ResultReview(data) => {
-                                data.project_id == id
-                                    && operation.snapshot_id().is_none_or(|context_id| {
-                                        data.context_id.as_deref() == Some(context_id)
-                                    })
+                            (Some(_), _) => {
+                                operation.project_id().is_none_or(|pid| match payload {
+                                    Payload::DecisionRecord(data) => data.project_id == pid,
+                                    _ => false,
+                                })
                             }
-                            _ => false,
-                        })
+                            (None, _) => operation.project_id().is_none_or(|pid| match payload {
+                                Payload::Select(project) => project.record.id == pid,
+                                Payload::Inspect(project) | Payload::Relocate(project) => {
+                                    project.record.id == pid
+                                }
+                                Payload::ProjectIdentity(data) => data.legacy_project_id == pid,
+                                Payload::ContextBrowse(data)
+                                | Payload::ContextCapture(data)
+                                | Payload::ContextList(data)
+                                | Payload::ContextGet(data)
+                                | Payload::ContextValidate(data)
+                                | Payload::ContextIndexStatus(data)
+                                | Payload::ContextIndex(data)
+                                | Payload::ContextSearch(data)
+                                | Payload::ContextSourcePreview(data)
+                                | Payload::CodexStatus(data)
+                                | Payload::CodexPrepare(data)
+                                | Payload::CodexApproval(data)
+                                | Payload::CodexStart(data)
+                                | Payload::CodexEvents(data)
+                                | Payload::CodexCancel(data)
+                                | Payload::CodexHistory(data)
+                                | Payload::CodexCitation(data)
+                                | Payload::TaskList(data)
+                                | Payload::TaskCreate(data)
+                                | Payload::TaskUpdate(data)
+                                | Payload::TaskStart(data)
+                                | Payload::ExecutionLatest(data)
+                                | Payload::ExecutionEvents(data)
+                                | Payload::ExecutionCancel(data)
+                                | Payload::ExecutionResult(data)
+                                | Payload::ExecutionChange(data)
+                                | Payload::WorkingList(data)
+                                | Payload::WorkingLatest(data)
+                                | Payload::WorkingCapture(data)
+                                | Payload::WorkingCompare(data)
+                                | Payload::ResultReviewStatus(data)
+                                | Payload::ResultReview(data) => {
+                                    data.project_id == pid
+                                        && operation.snapshot_id().is_none_or(|context_id| {
+                                            data.context_id.as_deref() == Some(context_id)
+                                        })
+                                }
+                                _ => false,
+                            }),
+                        }
                 }
                 Body::Failure { ok: false, .. } => true,
                 _ => false,
@@ -592,6 +687,8 @@ pub enum Operation<'a> {
     Task(&'a TaskRequest),
     #[serde(untagged)]
     Working(&'a WorkingRequest),
+    #[serde(untagged)]
+    Resume(&'a ResumeRequest),
 }
 
 #[derive(Deserialize, Serialize)]
@@ -914,6 +1011,174 @@ impl WorkingRequest {
     }
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DecisionEvidenceRefInput {
+    context_id: String,
+    path: String,
+    sha256: String,
+    chunk: u32,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(
+    tag = "operation",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum ResumeRequest {
+    #[serde(rename = "project.identity")]
+    Identity {
+        project_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        path: Option<String>,
+    },
+    #[serde(rename = "project.resume")]
+    Resume {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        correlation_id: Option<String>,
+    },
+    #[serde(rename = "decision.evidenceResolve")]
+    EvidenceResolve {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        context_id: String,
+        path: String,
+        sha256: String,
+        chunk: u32,
+    },
+    #[serde(rename = "decision.comparePresent")]
+    ComparePresent {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        context_id: String,
+        path: String,
+        sha256: String,
+        chunk: u32,
+    },
+    #[serde(rename = "decision.record")]
+    DecisionRecord {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        request_id: String,
+        assertion_id: Option<String>,
+        expected_revision: u64,
+        content: String,
+        author: String,
+        reason: String,
+        human_confirmed: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        promote_canonical: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        effective_at: Option<String>,
+        evidence: Option<DecisionEvidenceRefInput>,
+    },
+    #[serde(rename = "decision.list")]
+    DecisionList {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+    },
+    #[serde(rename = "decision.get")]
+    DecisionGet {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        assertion_id: String,
+    },
+    #[serde(rename = "decision.purge")]
+    DecisionPurge {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        assertion_id: String,
+        expected_revision: u64,
+        confirmed_scope: bool,
+        reason: String,
+    },
+}
+
+impl ResumeRequest {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Identity { .. } => "project.identity",
+            Self::Resume { .. } => "project.resume",
+            Self::EvidenceResolve { .. } => "decision.evidenceResolve",
+            Self::ComparePresent { .. } => "decision.comparePresent",
+            Self::DecisionRecord { .. } => "decision.record",
+            Self::DecisionList { .. } => "decision.list",
+            Self::DecisionGet { .. } => "decision.get",
+            Self::DecisionPurge { .. } => "decision.purge",
+        }
+    }
+
+    fn project_id(&self) -> &str {
+        match self {
+            Self::Identity { project_id, .. }
+            | Self::Resume { project_id, .. }
+            | Self::EvidenceResolve { project_id, .. }
+            | Self::ComparePresent { project_id, .. }
+            | Self::DecisionRecord { project_id, .. }
+            | Self::DecisionList { project_id, .. }
+            | Self::DecisionGet { project_id, .. }
+            | Self::DecisionPurge { project_id, .. } => project_id,
+        }
+    }
+
+    fn scope(&self) -> Option<(&str, &str, &str)> {
+        match self {
+            Self::Identity { .. } => None,
+            Self::Resume {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::EvidenceResolve {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::ComparePresent {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::DecisionRecord {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::DecisionList {
+                project_id,
+                binding_id,
+                worktree_id,
+            }
+            | Self::DecisionGet {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::DecisionPurge {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            } => Some((project_id, binding_id, worktree_id)),
+        }
+    }
+}
+
 impl<'a> Operation<'a> {
     fn name(self) -> &'static str {
         match self {
@@ -939,6 +1204,7 @@ impl<'a> Operation<'a> {
             Self::Codex(request) => request.name(),
             Self::Task(request) => request.name(),
             Self::Working(request) => request.name(),
+            Self::Resume(request) => request.name(),
         }
     }
 
@@ -959,6 +1225,14 @@ impl<'a> Operation<'a> {
             Self::Codex(request) => Some(request.project_id()),
             Self::Task(request) => Some(request.project_id()),
             Self::Working(request) => Some(request.project_id()),
+            Self::Resume(request) => Some(request.project_id()),
+            _ => None,
+        }
+    }
+
+    fn scope(self) -> Option<(&'a str, &'a str, &'a str)> {
+        match self {
+            Self::Resume(request) => request.scope(),
             _ => None,
         }
     }
@@ -1119,6 +1393,11 @@ impl Sidecar {
         {
             return Err(ErrorCode::InvalidRequest);
         }
+        if operation.scope().is_some_and(|(pid, bid, wid)| {
+            !valid_project_id(pid) || !valid_project_id(bid) || !valid_project_id(wid)
+        }) {
+            return Err(ErrorCode::InvalidRequest);
+        }
 
         let started = Instant::now();
         let mut packet = serde_json::to_vec(&Request {
@@ -1221,5 +1500,313 @@ mod codex_tests {
             .remove("unconfinedConfirmed");
         workspace["operation"] = "codex.approval".into();
         assert!(serde_json::from_value::<CodexRequest>(workspace).is_err());
+    }
+}
+
+#[cfg(test)]
+mod resume_tests {
+    use super::*;
+
+    #[test]
+    fn resume_request_validates_scope_and_rejects_swapped_binding() {
+        let project_id = "a".repeat(64);
+        let binding_id = "b".repeat(64);
+        let worktree_id = "c".repeat(64);
+        let other_binding = "d".repeat(64);
+
+        let resume_json = serde_json::json!({
+            "operation": "project.resume",
+            "projectId": project_id,
+            "bindingId": binding_id,
+            "worktreeId": worktree_id,
+            "correlationId": "corr-1"
+        });
+        let req: ResumeRequest = serde_json::from_value(resume_json.clone()).unwrap();
+        let operation = Operation::Resume(&req);
+        assert_eq!(operation.name(), "project.resume");
+        assert_eq!(
+            operation.scope(),
+            Some((
+                project_id.as_str(),
+                binding_id.as_str(),
+                worktree_id.as_str()
+            ))
+        );
+
+        let good_response: Response = serde_json::from_value(serde_json::json!({
+            "version": VERSION,
+            "id": "req-1",
+            "ok": true,
+            "operation": "project.resume",
+            "data": {
+                "scope": {
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id
+                }
+            }
+        }))
+        .unwrap();
+        assert!(good_response.matches("req-1", operation));
+
+        let swapped_binding: Response = serde_json::from_value(serde_json::json!({
+            "version": VERSION,
+            "id": "req-1",
+            "ok": true,
+            "operation": "project.resume",
+            "data": {
+                "scope": {
+                    "projectId": project_id,
+                    "bindingId": other_binding,
+                    "worktreeId": worktree_id
+                }
+            }
+        }))
+        .unwrap();
+        assert!(!swapped_binding.matches("req-1", operation));
+
+        let mut extra = resume_json;
+        extra["unexpected"] = true.into();
+        assert!(serde_json::from_value::<ResumeRequest>(extra).is_err());
+    }
+
+    #[test]
+    fn all_resume_and_decision_variants_round_trip_and_match_scope() {
+        let legacy_id = "1".repeat(64);
+        let project_id = "a".repeat(64);
+        let binding_id = "b".repeat(64);
+        let worktree_id = "c".repeat(64);
+        let context_id = "d".repeat(64);
+        let sha256 = "e".repeat(64);
+        let assertion_id = "f".repeat(64);
+        let other_id = "9".repeat(64);
+
+        let scope_json = || {
+            serde_json::json!({
+                "projectId": project_id,
+                "bindingId": binding_id,
+                "worktreeId": worktree_id
+            })
+        };
+
+        // 1. project.identity (without path and with path)
+        for req_json in [
+            serde_json::json!({
+                "operation": "project.identity",
+                "projectId": legacy_id
+            }),
+            serde_json::json!({
+                "operation": "project.identity",
+                "projectId": legacy_id,
+                "path": "C:\\repos\\example"
+            }),
+        ] {
+            let req: ResumeRequest = serde_json::from_value(req_json).unwrap();
+            let op = Operation::Resume(&req);
+            assert_eq!(op.name(), "project.identity");
+            assert!(op.scope().is_none());
+            assert_eq!(op.project_id(), Some(legacy_id.as_str()));
+
+            let ok_resp: Response = serde_json::from_value(serde_json::json!({
+                "version": VERSION,
+                "id": "id-1",
+                "ok": true,
+                "operation": "project.identity",
+                "data": {
+                    "scope": scope_json(),
+                    "legacyProjectId": legacy_id
+                }
+            }))
+            .unwrap();
+            assert!(ok_resp.matches("id-1", op));
+
+            let bad_resp: Response = serde_json::from_value(serde_json::json!({
+                "version": VERSION,
+                "id": "id-1",
+                "ok": true,
+                "operation": "project.identity",
+                "data": {
+                    "scope": scope_json(),
+                    "legacyProjectId": other_id
+                }
+            }))
+            .unwrap();
+            assert!(!bad_resp.matches("id-1", op));
+        }
+
+        // 2. Scope-validated operations returning ScopePayload
+        let scoped_cases: Vec<(&str, serde_json::Value)> = vec![
+            (
+                "project.resume",
+                serde_json::json!({
+                    "operation": "project.resume",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id
+                }),
+            ),
+            (
+                "decision.evidenceResolve",
+                serde_json::json!({
+                    "operation": "decision.evidenceResolve",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "contextId": context_id,
+                    "path": "src/lib.ts",
+                    "sha256": sha256,
+                    "chunk": 0
+                }),
+            ),
+            (
+                "decision.comparePresent",
+                serde_json::json!({
+                    "operation": "decision.comparePresent",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "contextId": context_id,
+                    "path": "src/lib.ts",
+                    "sha256": sha256,
+                    "chunk": 0
+                }),
+            ),
+            (
+                "decision.list",
+                serde_json::json!({
+                    "operation": "decision.list",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id
+                }),
+            ),
+            (
+                "decision.get",
+                serde_json::json!({
+                    "operation": "decision.get",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "assertionId": assertion_id
+                }),
+            ),
+            (
+                "decision.purge",
+                serde_json::json!({
+                    "operation": "decision.purge",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "assertionId": assertion_id,
+                    "expectedRevision": 2,
+                    "confirmedScope": true,
+                    "reason": "Expurgo de teste"
+                }),
+            ),
+        ];
+
+        for (op_name, req_json) in scoped_cases {
+            let req: ResumeRequest = serde_json::from_value(req_json.clone()).unwrap();
+            let op = Operation::Resume(&req);
+            assert_eq!(op.name(), op_name);
+            assert_eq!(
+                serde_json::to_value(op).unwrap(),
+                req_json,
+                "round-trip mismatch for {op_name}"
+            );
+
+            let ok_resp: Response = serde_json::from_value(serde_json::json!({
+                "version": VERSION,
+                "id": "sc-1",
+                "ok": true,
+                "operation": op_name,
+                "data": { "scope": scope_json() }
+            }))
+            .unwrap();
+            assert!(ok_resp.matches("sc-1", op), "{op_name} should match scope");
+
+            let bad_resp: Response = serde_json::from_value(serde_json::json!({
+                "version": VERSION,
+                "id": "sc-1",
+                "ok": true,
+                "operation": op_name,
+                "data": {
+                    "scope": {
+                        "projectId": other_id,
+                        "bindingId": binding_id,
+                        "worktreeId": worktree_id
+                    }
+                }
+            }))
+            .unwrap();
+            assert!(
+                !bad_resp.matches("sc-1", op),
+                "{op_name} must reject swapped projectId"
+            );
+        }
+
+        // 3. decision.record (manual null evidence + canonical with C01 ref)
+        for req_json in [
+            serde_json::json!({
+                "operation": "decision.record",
+                "projectId": project_id,
+                "bindingId": binding_id,
+                "worktreeId": worktree_id,
+                "requestId": "dec-req-1",
+                "assertionId": null,
+                "expectedRevision": 0,
+                "content": "Manual decision",
+                "author": "Operador",
+                "reason": "Inicial",
+                "humanConfirmed": true,
+                "evidence": null
+            }),
+            serde_json::json!({
+                "operation": "decision.record",
+                "projectId": project_id,
+                "bindingId": binding_id,
+                "worktreeId": worktree_id,
+                "requestId": "dec-req-2",
+                "assertionId": assertion_id,
+                "expectedRevision": 1,
+                "content": "Canonical decision",
+                "author": "Operador",
+                "reason": "Com prova C01",
+                "humanConfirmed": true,
+                "promoteCanonical": true,
+                "effectiveAt": "2026-11-22T10:00:00.000Z",
+                "evidence": {
+                    "contextId": context_id,
+                    "path": "src/lib.ts",
+                    "sha256": sha256,
+                    "chunk": 0
+                }
+            }),
+        ] {
+            let req: ResumeRequest = serde_json::from_value(req_json.clone()).unwrap();
+            let op = Operation::Resume(&req);
+            assert_eq!(op.name(), "decision.record");
+            assert_eq!(serde_json::to_value(op).unwrap(), req_json);
+
+            let ok_resp: Response = serde_json::from_value(serde_json::json!({
+                "version": VERSION,
+                "id": "rec-1",
+                "ok": true,
+                "operation": "decision.record",
+                "data": { "projectId": project_id }
+            }))
+            .unwrap();
+            assert!(ok_resp.matches("rec-1", op));
+
+            let bad_resp: Response = serde_json::from_value(serde_json::json!({
+                "version": VERSION,
+                "id": "rec-1",
+                "ok": true,
+                "operation": "decision.record",
+                "data": { "projectId": other_id }
+            }))
+            .unwrap();
+            assert!(!bad_resp.matches("rec-1", op));
+        }
     }
 }

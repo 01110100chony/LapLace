@@ -1,4 +1,5 @@
 import {
+  isIdentityScope,
   isIpcError,
   isResponse,
   contextSearchPageSize,
@@ -7,7 +8,11 @@ import {
   type CodexPreview,
   type ContextSearchInput,
   type ContextSourceRef,
+  type DecisionEvidenceInput,
+  type DecisionPurgeInput,
+  type DecisionRecordInput,
   type ErrorCode,
+  type IdentityScope,
   type Operation,
   type ReviewInput,
   type Results,
@@ -41,7 +46,8 @@ type DesktopCommand =
   | "context_source_preview"
   | "codex_request"
   | "task_request"
-  | "working_request";
+  | "working_request"
+  | "resume_request";
 type PickerOperation =
   "workspace.addLocal" | "project.relocate" | "clone.start";
 type DesktopOperation = Exclude<Operation, "codex.approval" | "clone.prepare">;
@@ -58,6 +64,14 @@ const commands: Record<DesktopOperation, DesktopCommand> = {
   "project.select": "project_select",
   "project.inspect": "project_inspect",
   "project.relocate": "project_relocate",
+  "project.identity": "resume_request",
+  "project.resume": "resume_request",
+  "decision.evidenceResolve": "resume_request",
+  "decision.comparePresent": "resume_request",
+  "decision.record": "resume_request",
+  "decision.list": "resume_request",
+  "decision.get": "resume_request",
+  "decision.purge": "resume_request",
   "context.browse": "context_browse",
   "context.capture": "context_capture",
   "context.list": "context_list",
@@ -125,7 +139,8 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
         command,
         command === "codex_request" ||
           command === "task_request" ||
-          command === "working_request"
+          command === "working_request" ||
+          command === "resume_request"
           ? { id, request: { operation, ...args } }
           : { ...args, id },
       );
@@ -146,21 +161,53 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
       if (!isResponse(response, id, operation))
         throw new DesktopError("invalid_response");
       if (!response.ok) throw new DesktopError(response.error.code);
-      if (
+      if (operation === "project.identity") {
+        const identity = response.data as Results["project.identity"];
+        if (identity.legacyProjectId !== args.projectId)
+          throw new DesktopError("invalid_response");
+      } else if (
+        typeof response.data === "object" &&
+        response.data !== null &&
+        "scope" in response.data &&
+        isIdentityScope(response.data.scope)
+      ) {
+        if (
+          (args.projectId !== undefined &&
+            response.data.scope.projectId !== args.projectId) ||
+          (args.bindingId !== undefined &&
+            response.data.scope.bindingId !== args.bindingId) ||
+          (args.worktreeId !== undefined &&
+            response.data.scope.worktreeId !== args.worktreeId)
+        )
+          throw new DesktopError("invalid_response");
+      } else if (
         args.projectId !== undefined &&
         ("projectId" in response.data
           ? response.data.projectId
           : "id" in response.data
             ? response.data.id
             : undefined) !== args.projectId
-      )
+      ) {
         throw new DesktopError("invalid_response");
-      if (
-        typeof args.contextId === "string" &&
-        (!("contextId" in response.data) ||
-          response.data.contextId !== args.contextId)
-      )
-        throw new DesktopError("invalid_response");
+      }
+      if (typeof args.contextId === "string") {
+        if (operation === "decision.evidenceResolve") {
+          const ev = (response.data as Results["decision.evidenceResolve"])
+            .evidence;
+          if (ev.ref !== null && ev.ref.contextId !== args.contextId)
+            throw new DesktopError("invalid_response");
+        } else if (operation === "decision.comparePresent") {
+          const ev = (response.data as Results["decision.comparePresent"])
+            .historical.evidence;
+          if (ev.ref !== null && ev.ref.contextId !== args.contextId)
+            throw new DesktopError("invalid_response");
+        } else if (
+          !("contextId" in response.data) ||
+          response.data.contextId !== args.contextId
+        ) {
+          throw new DesktopError("invalid_response");
+        }
+      }
       if (
         typeof args.cloneId === "string" &&
         (!("cloneId" in response.data) ||
@@ -190,6 +237,77 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
     select: (projectId: string) => request("project.select", { projectId }),
     inspect: (projectId: string) => request("project.inspect", { projectId }),
     relocate: (projectId: string) => request("project.relocate", { projectId }),
+    identity: (projectId: string, path?: string) =>
+      request(
+        "project.identity",
+        path === undefined ? { projectId } : { projectId, path },
+      ),
+    async resume(scope: IdentityScope, correlationId?: string) {
+      const payload =
+        correlationId === undefined ? scope : { ...scope, correlationId };
+      const summary = await request("project.resume", payload);
+      if (
+        correlationId !== undefined &&
+        summary.correlationId !== correlationId
+      )
+        throw new DesktopError("invalid_response");
+      return summary;
+    },
+    decisions: {
+      async evidenceResolve(
+        scope: IdentityScope,
+        ref: Exclude<DecisionEvidenceInput, null>,
+      ) {
+        const result = await request("decision.evidenceResolve", {
+          ...scope,
+          ...ref,
+        });
+        if (
+          result.evidence.ref !== null &&
+          (result.evidence.ref.path !== ref.path ||
+            result.evidence.ref.sha256 !== ref.sha256 ||
+            result.evidence.ref.chunk !== ref.chunk)
+        )
+          throw new DesktopError("invalid_response");
+        return result;
+      },
+      async comparePresent(
+        scope: IdentityScope,
+        ref: Exclude<DecisionEvidenceInput, null>,
+      ) {
+        const result = await request("decision.comparePresent", {
+          ...scope,
+          ...ref,
+        });
+        if (result.present.path !== ref.path)
+          throw new DesktopError("invalid_response");
+        return result;
+      },
+      async record(input: DecisionRecordInput) {
+        const saved = await request("decision.record", input);
+        if (
+          (input.assertionId !== null &&
+            saved.assertionId !== input.assertionId) ||
+          saved.revision !== input.expectedRevision + 1 ||
+          saved.author !== input.author
+        )
+          throw new DesktopError("invalid_response");
+        return saved;
+      },
+      list: (scope: IdentityScope) => request("decision.list", scope),
+      async get(scope: IdentityScope, assertionId: string) {
+        const result = await request("decision.get", { ...scope, assertionId });
+        if (result.assertionId !== assertionId)
+          throw new DesktopError("invalid_response");
+        return result;
+      },
+      async purge(input: DecisionPurgeInput) {
+        const receipt = await request("decision.purge", input);
+        if (receipt.assertionId !== input.assertionId)
+          throw new DesktopError("invalid_response");
+        return receipt;
+      },
+    },
     working: {
       list: (projectId: string) => request("working.list", { projectId }),
       latest: (projectId: string) => request("working.latest", { projectId }),
@@ -521,6 +639,8 @@ const messages: Record<ErrorCode, string> = {
     "A identidade do checkout ainda não pôde ser confirmada. Restabeleça o acesso à pasta cadastrada e clique em Atualizar.",
   project_already_registered:
     "Esse checkout já está cadastrado. Abra o projeto correspondente na barra lateral para consultar ou relocalizar sua pasta.",
+  project_identity_ambiguous:
+    "A identidade do repositório apresentou múltiplos vínculos candidatos. Confirme explicitamente antes de retomar.",
   catalog_unavailable:
     "O catálogo local está indisponível. Verifique o acesso aos dados do aplicativo e tente novamente.",
   dialog_failed: "Não foi possível abrir o seletor de pastas. Tente novamente.",
@@ -568,6 +688,15 @@ const messages: Record<ErrorCode, string> = {
     "O caminho está em conflito. Consulte os estágios do índice na captura.",
   result_review_conflict:
     "A revisão ou a evidência mudou. Atualize a revisão antes de registrar outra decisão.",
+  decision_unavailable:
+    "A decisão solicitada não está disponível neste escopo.",
+  decision_conflict:
+    "A decisão mudou desde a última leitura. Atualize o painel antes de salvar outra revisão.",
+  decision_authorization_required:
+    "A gravação ou alteração de decisão exige confirmação humana explícita.",
+  decision_purge_pending:
+    "A exclusão da decisão ficou pendente e precisa ser concluída antes de reabrir o conteúdo.",
+  resume_stale: "A leitura da retomada ficou obsoleta após a troca de projeto.",
   context_source_unavailable:
     "A fonte preservada está indisponível ou não passou na verificação de integridade.",
 };

@@ -2,10 +2,14 @@ import type {
   GitObservation,
   GitSummary,
   Health,
+  Project,
+  ProjectIdentityResult,
   ProjectRecord,
+  ResumeSummary,
 } from "@laplace/contracts";
 import { useState } from "react";
 import { ContextView } from "./ContextView";
+import { ResumeCockpit } from "./ResumeCockpit";
 import { TaskView, type TaskProposal } from "./TaskView";
 import { WorkingTreeView } from "./WorkingTreeView";
 import type { createDesktopClient } from "./ipc";
@@ -229,25 +233,35 @@ function ObservedTime({ summary }: { summary: GitSummary }) {
 export function ProjectView({
   project,
   summary,
+  identity,
+  resume,
   status,
   refresh,
   relocate,
+  confirmIdentity,
   contextClient,
   codexClient,
   taskClient,
   executionClient,
   workingClient,
+  decisionClient,
+  onResumeUpdated,
 }: {
   project: ProjectRecord;
   summary: GitObservation | undefined;
+  identity: ProjectIdentityResult | null;
+  resume: ResumeSummary | null;
   status: ProjectStatus;
   refresh: () => void;
   relocate: () => void;
+  confirmIdentity: () => Promise<Project>;
   contextClient: ReturnType<typeof createDesktopClient>["context"];
   codexClient: ReturnType<typeof createDesktopClient>["codex"];
   taskClient: ReturnType<typeof createDesktopClient>["task"];
   executionClient: ReturnType<typeof createDesktopClient>["execution"];
   workingClient: ReturnType<typeof createDesktopClient>["working"];
+  decisionClient: ReturnType<typeof createDesktopClient>["decisions"];
+  onResumeUpdated: () => void;
 }) {
   const loading = status.state === "loading";
   const [section, setSection] = useState<
@@ -348,71 +362,19 @@ export function ProjectView({
           }}
         />
       ) : (
-        summary && (
-          <>
-            <div className="project-grid">
-              <section className="panel" aria-labelledby="repo-heading">
-                <h2 id="repo-heading">Repositório Git</h2>
-                <dl className="repo-info">
-                  <div>
-                    <dt>Branch</dt>
-                    <dd>
-                      <code>{branchLabel(summary)}</code>
-                    </dd>
-                  </div>
-                  <div>
-                    <dt>HEAD</dt>
-                    <dd>
-                      {summary.head ? (
-                        <code>{summary.head}</code>
-                      ) : (
-                        "Sem commits"
-                      )}
-                    </dd>
-                  </div>
-                </dl>
-              </section>
-              <section className="panel" aria-labelledby="changes-heading">
-                <h2 id="changes-heading">Alterações</h2>
-                <dl className="change-counts">
-                  <div>
-                    <dt>Preparadas</dt>
-                    <dd>{summary.changes.staged}</dd>
-                  </div>
-                  <div>
-                    <dt>Não preparadas</dt>
-                    <dd>{summary.changes.unstaged}</dd>
-                  </div>
-                  <div>
-                    <dt>Não rastreadas</dt>
-                    <dd>{summary.changes.untracked}</dd>
-                  </div>
-                  {summary.changes.conflicted > 0 && (
-                    <div>
-                      <dt>Em conflito</dt>
-                      <dd>{summary.changes.conflicted}</dd>
-                    </div>
-                  )}
-                </dl>
-                {Object.values(summary.changes).every(
-                  (count) => count === 0,
-                ) && (
-                  <p className="clean">
-                    <span className="status-dot" aria-hidden="true" /> Árvore de
-                    trabalho limpa
-                  </p>
-                )}
-              </section>
-            </div>
-            <p className="observed" role="status">
-              {status.state === "ready"
-                ? "Leitura atual do Git"
-                : "Última leitura do Git em cache"}
-              {" · "}
-              <ObservedTime summary={summary} />
-            </p>
-          </>
-        )
+        <ResumeCockpit
+          key={project.id}
+          project={project}
+          fallbackSummary={summary}
+          identity={identity}
+          resume={resume}
+          loading={loading}
+          relocate={relocate}
+          confirmIdentity={confirmIdentity}
+          contextClient={contextClient}
+          decisionClient={decisionClient}
+          onResumeUpdated={onResumeUpdated}
+        />
       )}
     </>
   );

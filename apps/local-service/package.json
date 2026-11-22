@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@laplace/agents": "workspace:*",
-    "@laplace/contracts": "workspace:*"
+    "@laplace/contracts": "workspace:*",
+    "@laplace/core": "workspace:*"
   }
 }
