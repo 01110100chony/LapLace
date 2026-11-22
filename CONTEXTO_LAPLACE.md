@@ -30,6 +30,7 @@ A entrega de longo prazo descrita nos documentos é uma bancada multiprojeto: re
 ## 2. Confiabilidade e histórico recuperável
 
 Use estas distinções:
+
 - **Implementado/observado:** sustentado por código, arquivos, Git ou resultado registrado em README/log local.
 - **Decisão registrada:** direção documentada em plano/changelog; não prova aprovação em conversa inacessível.
 - **Planejado:** proposta ou critério futuro.
@@ -91,7 +92,7 @@ Público, roadmap, pesquisa de mercado e funcionalidades futuras são propostas.
 
 ## 4. Arquitetura, estrutura e arquivos
 
-~~~text
+```text
 Renderer React
   └─ comandos tipados Tauri
        └─ host Rust (comandos permitidos, timeout, supervisão)
@@ -99,7 +100,7 @@ Renderer React
                  ├─ SQLite, capturas e FTS5
                  ├─ leitor Git
                  └─ adaptador Codex/eventos
-~~~
+```
 
 A UI envia IDs/operações; o serviço resolve caminhos cadastrados. Diálogo nativo seleciona/relocaliza diretórios. Sidecar começa sob demanda e termina com a janela. IPC é v2, 192 KiB/mensagem; README registra timeout do host de 18 s e resumo Git de 7 s.
 
@@ -111,7 +112,7 @@ C02 usa FTS5 para nome/caminho/trechos associados a captura e projeto; prévia r
 
 Árvore real:
 
-~~~text
+```text
 apps/
   desktop/                  React, Vite e telas
     src-tauri/              host Rust/Tauri, IPC e configuração
@@ -121,11 +122,12 @@ packages/
   agents/                   Codex e mock
 scripts/                    smoke Windows e sonda Codex
 Laplace_Plano_v2/            planos e protótipos
-~~~
+```
 
 O plano menciona packages/core, mas esse pacote não existe no checkout atual. A implementação está em apps/local-service, packages/contracts e packages/agents.
 
 Arquivos de entrada:
+
 - README.md: comportamento, comandos, limites, resultados reportados e C01–C03.
 - AGENTS.md: ambiente GNU/MSVC, validação e raiz canônica.
 - package.json, pnpm-workspace.yaml, pnpm-lock.yaml, .node-version: workspace e versões.
@@ -144,18 +146,18 @@ Versões documentadas: Windows x64, WebView2, Git for Windows; para GNU, GCC e w
 
 Desenvolvimento GNU indicado em AGENTS.md:
 
-~~~powershell
+```powershell
 Set-Location 'C:\projetos2026\LapLace'
 $env:RUSTUP_TOOLCHAIN = 'stable-x86_64-pc-windows-gnu'
 pnpm install --frozen-lockfile
 pnpm dev --target x86_64-pc-windows-gnu
-~~~
+```
 
 Caso ausente, instalar toolchain GNU estável com rustfmt via rustup. Não houve instalação nesta tarefa.
 
 Verificações prescritas:
 
-~~~powershell
+```powershell
 $env:RUSTUP_TOOLCHAIN = 'stable-x86_64-pc-windows-gnu'
 pnpm lint
 pnpm typecheck
@@ -165,7 +167,7 @@ pnpm build:web
 pnpm --filter @laplace/desktop prepare:sidecar
 cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --all -- --check
 cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --locked --target x86_64-pc-windows-gnu --features custom-protocol
-~~~
+```
 
 AGENTS.md descreve build GNU de NSIS e smoke por scripts/smoke-windows.ps1. Leia o roteiro do README/script antes de execução. Nenhum teste ou build foi executado para esta documentação.
 
@@ -174,14 +176,16 @@ AGENTS.md descreve build GNU de NSIS e smoke por scripts/smoke-windows.ps1. Leia
 Build inclui node.exe oficial e o sidecar. README diz que instalador não tem assinatura Authenticode, podendo gerar alertas; Git for Windows não é empacotado e é necessário para funções Git.
 
 Variáveis documentadas:
+
 - LAPLACE_CODEX_DEV=mock e LAPLACE_CODEX_MOCK_SCENARIO (fragmented padrão; completed, cancel, timeout, malformed_jsonl, authentication_error, interrupted, preparation_failure, late_after_cancel).
 - LAPLACE_CODEX_DEV=workspace: execução real sem confinamento provado; usar só dados fictícios/não sensíveis.
 - LAPLACE_CONTEXT_EXCLUDES: caminhos adicionais relativos separados por ponto e vírgula.
-São lidas no startup de desenvolvimento; não grave credenciais neste documento.
+  São lidas no startup de desenvolvimento; não grave credenciais neste documento.
 
 ## 6. Git e artefatos
 
 Snapshot antes deste documento:
+
 - Raiz canônica: C:\projetos2026\LapLace.
 - Branch feat/codex-read-adapter, HEAD 9ccf08a59edd2fa39751c026b7ae8fb5393e743a, feat: habilita modos de desenvolvimento do Codex.
 - Única worktree Git observada: C:/projetos2026/LapLace.
@@ -206,6 +210,7 @@ Resultados abaixo vêm do README/logs; não foram executados nesta tarefa.
 - **C03.1:** logs .validation/c031-final-* têm timestamps antes do HEAD atual. .validation/d07-smoke-local.log é evidência do D07, não valida branch atual.
 
 Cuidados recorrentes:
+
 1. Diretório temporário e CLI read-only, por si só, não confinam leitura; controle positivo e negativo devem ocorrer sob a mesma política.
 2. Caminho textual ou HEAD igual não identificam checkout. Usar identidade raiz/worktree e realpath canônico.
 3. Captura é leitura observada, não snapshot transacional do filesystem inteiro; mudanças detectadas invalidam geração, mas mudanças transitórias entre observações podem escapar.
