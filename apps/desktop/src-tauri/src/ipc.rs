@@ -85,6 +85,17 @@ pub enum ErrorCode {
     OverlayRaceDetected,
     OverlayBlobMissing,
     OverlayUnsafeTarget,
+    PlannerInvalidInput,
+    PlannerNotFound,
+    PlannerDriftDetected,
+    PlannerWorktreeUnavailable,
+    OperationGrantInvalid,
+    OperationGrantExpired,
+    ExecutionBackendBlocked,
+    ExecutionInterrupted,
+    ApplyNotApproved,
+    ApplyConflictDetected,
+    VerifierApprovalInvalid,
     CloneUnavailable,
     CloneBusy,
     CloneDestinationExists,
@@ -400,6 +411,46 @@ enum Payload {
     MemoryOverlayVerify(ScopePayload),
     #[serde(rename = "memory.overlayReconstruct")]
     MemoryOverlayReconstruct(ScopePayload),
+    #[serde(rename = "planner.explore")]
+    PlannerExplore(ScopePayload),
+    #[serde(rename = "planner.planCreate")]
+    PlannerPlanCreate(ScopePayload),
+    #[serde(rename = "planner.planList")]
+    PlannerPlanList(ScopePayload),
+    #[serde(rename = "planner.planPreflight")]
+    PlannerPlanPreflight(ScopePayload),
+    #[serde(rename = "planner.grantIssue")]
+    PlannerGrantIssue(ScopePayload),
+    #[serde(rename = "planner.grantList")]
+    PlannerGrantList(ScopePayload),
+    #[serde(rename = "planner.grantRevoke")]
+    PlannerGrantRevoke(ScopePayload),
+    #[serde(rename = "planner.boundaryStatus")]
+    PlannerBoundaryStatus(ScopePayload),
+    #[serde(rename = "planner.executionStart")]
+    PlannerExecutionStart(ScopePayload),
+    #[serde(rename = "planner.executionList")]
+    PlannerExecutionList(ScopePayload),
+    #[serde(rename = "planner.executionEvents")]
+    PlannerExecutionEvents(ScopePayload),
+    #[serde(rename = "planner.executionCancel")]
+    PlannerExecutionCancel(ScopePayload),
+    #[serde(rename = "planner.worktreeCleanup")]
+    PlannerWorktreeCleanup(ScopePayload),
+    #[serde(rename = "planner.diffGet")]
+    PlannerDiffGet(ScopePayload),
+    #[serde(rename = "planner.diffReview")]
+    PlannerDiffReview(ScopePayload),
+    #[serde(rename = "planner.applyLocal")]
+    PlannerApplyLocal(ScopePayload),
+    #[serde(rename = "planner.verifierDefine")]
+    PlannerVerifierDefine(ScopePayload),
+    #[serde(rename = "planner.verifierList")]
+    PlannerVerifierList(ScopePayload),
+    #[serde(rename = "planner.verifierApprove")]
+    PlannerVerifierApprove(ScopePayload),
+    #[serde(rename = "planner.verifierRun")]
+    PlannerVerifierRun(ScopePayload),
 }
 
 impl Payload {
@@ -487,6 +538,26 @@ impl Payload {
             Self::MemoryOverlayList(_) => "memory.overlayList",
             Self::MemoryOverlayVerify(_) => "memory.overlayVerify",
             Self::MemoryOverlayReconstruct(_) => "memory.overlayReconstruct",
+            Self::PlannerExplore(_) => "planner.explore",
+            Self::PlannerPlanCreate(_) => "planner.planCreate",
+            Self::PlannerPlanList(_) => "planner.planList",
+            Self::PlannerPlanPreflight(_) => "planner.planPreflight",
+            Self::PlannerGrantIssue(_) => "planner.grantIssue",
+            Self::PlannerGrantList(_) => "planner.grantList",
+            Self::PlannerGrantRevoke(_) => "planner.grantRevoke",
+            Self::PlannerBoundaryStatus(_) => "planner.boundaryStatus",
+            Self::PlannerExecutionStart(_) => "planner.executionStart",
+            Self::PlannerExecutionList(_) => "planner.executionList",
+            Self::PlannerExecutionEvents(_) => "planner.executionEvents",
+            Self::PlannerExecutionCancel(_) => "planner.executionCancel",
+            Self::PlannerWorktreeCleanup(_) => "planner.worktreeCleanup",
+            Self::PlannerDiffGet(_) => "planner.diffGet",
+            Self::PlannerDiffReview(_) => "planner.diffReview",
+            Self::PlannerApplyLocal(_) => "planner.applyLocal",
+            Self::PlannerVerifierDefine(_) => "planner.verifierDefine",
+            Self::PlannerVerifierList(_) => "planner.verifierList",
+            Self::PlannerVerifierApprove(_) => "planner.verifierApprove",
+            Self::PlannerVerifierRun(_) => "planner.verifierRun",
         }
     }
 
@@ -575,7 +646,27 @@ impl Payload {
             | Self::MemoryOverlayCapture(data)
             | Self::MemoryOverlayList(data)
             | Self::MemoryOverlayVerify(data)
-            | Self::MemoryOverlayReconstruct(data) => data.scope.valid(),
+            | Self::MemoryOverlayReconstruct(data)
+            | Self::PlannerExplore(data)
+            | Self::PlannerPlanCreate(data)
+            | Self::PlannerPlanList(data)
+            | Self::PlannerPlanPreflight(data)
+            | Self::PlannerGrantIssue(data)
+            | Self::PlannerGrantList(data)
+            | Self::PlannerGrantRevoke(data)
+            | Self::PlannerBoundaryStatus(data)
+            | Self::PlannerExecutionStart(data)
+            | Self::PlannerExecutionList(data)
+            | Self::PlannerExecutionEvents(data)
+            | Self::PlannerExecutionCancel(data)
+            | Self::PlannerWorktreeCleanup(data)
+            | Self::PlannerDiffGet(data)
+            | Self::PlannerDiffReview(data)
+            | Self::PlannerApplyLocal(data)
+            | Self::PlannerVerifierDefine(data)
+            | Self::PlannerVerifierList(data)
+            | Self::PlannerVerifierApprove(data)
+            | Self::PlannerVerifierRun(data) => data.scope.valid(),
             Self::ContextSearch(data) => {
                 valid_project_id(&data.project_id)
                     && data.context_id.as_deref().is_none_or(valid_project_id)
@@ -693,7 +784,27 @@ impl Response {
                                 | Payload::MemoryOverlayCapture(data)
                                 | Payload::MemoryOverlayList(data)
                                 | Payload::MemoryOverlayVerify(data)
-                                | Payload::MemoryOverlayReconstruct(data),
+                                | Payload::MemoryOverlayReconstruct(data)
+                                | Payload::PlannerExplore(data)
+                                | Payload::PlannerPlanCreate(data)
+                                | Payload::PlannerPlanList(data)
+                                | Payload::PlannerPlanPreflight(data)
+                                | Payload::PlannerGrantIssue(data)
+                                | Payload::PlannerGrantList(data)
+                                | Payload::PlannerGrantRevoke(data)
+                                | Payload::PlannerBoundaryStatus(data)
+                                | Payload::PlannerExecutionStart(data)
+                                | Payload::PlannerExecutionList(data)
+                                | Payload::PlannerExecutionEvents(data)
+                                | Payload::PlannerExecutionCancel(data)
+                                | Payload::PlannerWorktreeCleanup(data)
+                                | Payload::PlannerDiffGet(data)
+                                | Payload::PlannerDiffReview(data)
+                                | Payload::PlannerApplyLocal(data)
+                                | Payload::PlannerVerifierDefine(data)
+                                | Payload::PlannerVerifierList(data)
+                                | Payload::PlannerVerifierApprove(data)
+                                | Payload::PlannerVerifierRun(data),
                             ) => {
                                 data.scope.project_id == pid
                                     && data.scope.binding_id == bid
@@ -872,6 +983,8 @@ pub enum Operation<'a> {
     Compiler(&'a CompilerRequest),
     #[serde(untagged)]
     Memory(&'a MemoryRequest),
+    #[serde(untagged)]
+    Planner(&'a PlannerRequest),
 }
 
 #[derive(Deserialize, Serialize)]
@@ -2087,6 +2200,387 @@ impl ResumeRequest {
     }
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(
+    tag = "operation",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum PlannerRequest {
+    #[serde(rename = "planner.explore")]
+    Explore {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        watched_paths: Option<Vec<String>>,
+    },
+    #[serde(rename = "planner.planCreate")]
+    PlanCreate {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        request_id: String,
+        title: String,
+        objective: String,
+        operation_kind: String,
+        backend_mode: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        target_branch: Option<String>,
+        target_paths: Vec<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        proposed_edits: Option<serde_json::Value>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        session_grant_id: Option<String>,
+    },
+    #[serde(rename = "planner.planList")]
+    PlanList {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+    },
+    #[serde(rename = "planner.planPreflight")]
+    PlanPreflight {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        plan_id: String,
+    },
+    #[serde(rename = "planner.grantIssue")]
+    GrantIssue {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        plan_id: String,
+        expected_base_digest: String,
+        backend_mode: String,
+        allowed_effects: Vec<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        ttl_ms: Option<u64>,
+        human_confirmed: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        unconfined_confirmed: Option<bool>,
+    },
+    #[serde(rename = "planner.grantList")]
+    GrantList {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        plan_id: Option<String>,
+    },
+    #[serde(rename = "planner.grantRevoke")]
+    GrantRevoke {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        grant_id: String,
+        reason: String,
+    },
+    #[serde(rename = "planner.boundaryStatus")]
+    BoundaryStatus {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+    },
+    #[serde(rename = "planner.executionStart")]
+    ExecutionStart {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        request_id: String,
+        plan_id: String,
+        grant_id: String,
+        expected_base_digest: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        mock_behavior: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        command_argv: Option<Vec<String>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        session_grant_id: Option<String>,
+    },
+    #[serde(rename = "planner.executionList")]
+    ExecutionList {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        plan_id: Option<String>,
+    },
+    #[serde(rename = "planner.executionEvents")]
+    ExecutionEvents {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        execution_id: String,
+        after_seq: u64,
+    },
+    #[serde(rename = "planner.executionCancel")]
+    ExecutionCancel {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        execution_id: String,
+        human_confirmed: bool,
+    },
+    #[serde(rename = "planner.worktreeCleanup")]
+    WorktreeCleanup {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        execution_id: String,
+        human_confirmed: bool,
+    },
+    #[serde(rename = "planner.diffGet")]
+    DiffGet {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        execution_id: String,
+    },
+    #[serde(rename = "planner.diffReview")]
+    DiffReview {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        request_id: String,
+        execution_id: String,
+        expected_diff_digest: String,
+        expected_revision: u64,
+        choice: String,
+        reviewer: String,
+        note: String,
+        human_confirmed: bool,
+    },
+    #[serde(rename = "planner.applyLocal")]
+    ApplyLocal {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        request_id: String,
+        execution_id: String,
+        grant_id: String,
+        expected_diff_digest: String,
+        apply_confirmed: bool,
+    },
+    #[serde(rename = "planner.verifierDefine")]
+    VerifierDefine {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        definition_id: String,
+        label: String,
+        argv: Vec<String>,
+        cwd_relative: String,
+        env_whitelist: Vec<String>,
+        timeout_ms: u64,
+        privilege_profile: String,
+    },
+    #[serde(rename = "planner.verifierList")]
+    VerifierList {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+    },
+    #[serde(rename = "planner.verifierApprove")]
+    VerifierApprove {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        definition_id: String,
+        expected_definition_digest: String,
+        reviewer: String,
+        human_confirmed: bool,
+    },
+    #[serde(rename = "planner.verifierRun")]
+    VerifierRun {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        request_id: String,
+        definition_id: String,
+        expected_definition_digest: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        execution_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        grant_id: Option<String>,
+    },
+}
+
+impl PlannerRequest {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Explore { .. } => "planner.explore",
+            Self::PlanCreate { .. } => "planner.planCreate",
+            Self::PlanList { .. } => "planner.planList",
+            Self::PlanPreflight { .. } => "planner.planPreflight",
+            Self::GrantIssue { .. } => "planner.grantIssue",
+            Self::GrantList { .. } => "planner.grantList",
+            Self::GrantRevoke { .. } => "planner.grantRevoke",
+            Self::BoundaryStatus { .. } => "planner.boundaryStatus",
+            Self::ExecutionStart { .. } => "planner.executionStart",
+            Self::ExecutionList { .. } => "planner.executionList",
+            Self::ExecutionEvents { .. } => "planner.executionEvents",
+            Self::ExecutionCancel { .. } => "planner.executionCancel",
+            Self::WorktreeCleanup { .. } => "planner.worktreeCleanup",
+            Self::DiffGet { .. } => "planner.diffGet",
+            Self::DiffReview { .. } => "planner.diffReview",
+            Self::ApplyLocal { .. } => "planner.applyLocal",
+            Self::VerifierDefine { .. } => "planner.verifierDefine",
+            Self::VerifierList { .. } => "planner.verifierList",
+            Self::VerifierApprove { .. } => "planner.verifierApprove",
+            Self::VerifierRun { .. } => "planner.verifierRun",
+        }
+    }
+
+    fn project_id(&self) -> &str {
+        match self {
+            Self::Explore { project_id, .. }
+            | Self::PlanCreate { project_id, .. }
+            | Self::PlanList { project_id, .. }
+            | Self::PlanPreflight { project_id, .. }
+            | Self::GrantIssue { project_id, .. }
+            | Self::GrantList { project_id, .. }
+            | Self::GrantRevoke { project_id, .. }
+            | Self::BoundaryStatus { project_id, .. }
+            | Self::ExecutionStart { project_id, .. }
+            | Self::ExecutionList { project_id, .. }
+            | Self::ExecutionEvents { project_id, .. }
+            | Self::ExecutionCancel { project_id, .. }
+            | Self::WorktreeCleanup { project_id, .. }
+            | Self::DiffGet { project_id, .. }
+            | Self::DiffReview { project_id, .. }
+            | Self::ApplyLocal { project_id, .. }
+            | Self::VerifierDefine { project_id, .. }
+            | Self::VerifierList { project_id, .. }
+            | Self::VerifierApprove { project_id, .. }
+            | Self::VerifierRun { project_id, .. } => project_id,
+        }
+    }
+
+    fn scope(&self) -> (&str, &str, &str) {
+        match self {
+            Self::Explore {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::PlanCreate {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::PlanList {
+                project_id,
+                binding_id,
+                worktree_id,
+            }
+            | Self::PlanPreflight {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::GrantIssue {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::GrantList {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::GrantRevoke {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::BoundaryStatus {
+                project_id,
+                binding_id,
+                worktree_id,
+            }
+            | Self::ExecutionStart {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::ExecutionList {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::ExecutionEvents {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::ExecutionCancel {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::WorktreeCleanup {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::DiffGet {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::DiffReview {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::ApplyLocal {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::VerifierDefine {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::VerifierList {
+                project_id,
+                binding_id,
+                worktree_id,
+            }
+            | Self::VerifierApprove {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::VerifierRun {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            } => (project_id, binding_id, worktree_id),
+        }
+    }
+}
+
 impl<'a> Operation<'a> {
     fn name(self) -> &'static str {
         match self {
@@ -2115,6 +2609,7 @@ impl<'a> Operation<'a> {
             Self::Resume(request) => request.name(),
             Self::Compiler(request) => request.name(),
             Self::Memory(request) => request.name(),
+            Self::Planner(request) => request.name(),
         }
     }
 
@@ -2138,6 +2633,7 @@ impl<'a> Operation<'a> {
             Self::Resume(request) => Some(request.project_id()),
             Self::Compiler(request) => Some(request.project_id()),
             Self::Memory(request) => Some(request.project_id()),
+            Self::Planner(request) => Some(request.project_id()),
             _ => None,
         }
     }
@@ -2147,6 +2643,7 @@ impl<'a> Operation<'a> {
             Self::Resume(request) => request.scope(),
             Self::Compiler(request) => Some(request.scope()),
             Self::Memory(request) => Some(request.scope()),
+            Self::Planner(request) => Some(request.scope()),
             _ => None,
         }
     }
@@ -2246,13 +2743,18 @@ impl Sidecar {
 
     fn spawn(&self) -> Result<Process, ErrorCode> {
         let helper = self.runtime.with_file_name("laplace-git-job.exe");
+        let supervision_helper = self.runtime.with_file_name("laplace-codex-job.exe");
         let mut command = Command::new(&self.runtime);
         command
             // Node's CommonJS resolver cannot canonicalize a Windows verbatim path.
             .arg("--preserve-symlinks-main")
             .arg(&self.script)
             .arg(&self.data_dir)
-            .arg(&helper)
+            .arg(&helper);
+        if supervision_helper.exists() {
+            command.arg("--supervision-helper").arg(&supervision_helper);
+        }
+        command
             .env_remove("NODE_OPTIONS")
             .env_remove("NODE_PATH")
             .env_remove("NODE_V8_COVERAGE")
@@ -2329,13 +2831,21 @@ impl Sidecar {
         if *stopped.borrow() {
             return Err(ErrorCode::ServiceUnavailable);
         }
-        let mut slot = timeout(REQUEST_TIMEOUT, self.process.lock())
+        let request_timeout = if matches!(
+            operation,
+            Operation::Planner(PlannerRequest::VerifierRun { .. })
+        ) {
+            Duration::from_secs(125)
+        } else {
+            REQUEST_TIMEOUT
+        };
+        let mut slot = timeout(request_timeout, self.process.lock())
             .await
             .map_err(|_| ErrorCode::IpcTimeout)?;
         if *stopped.borrow() {
             return Err(ErrorCode::ServiceUnavailable);
         }
-        let remaining = REQUEST_TIMEOUT.saturating_sub(started.elapsed());
+        let remaining = request_timeout.saturating_sub(started.elapsed());
         if remaining.is_zero() {
             return Err(ErrorCode::IpcTimeout);
         }
@@ -3237,6 +3747,304 @@ mod resume_tests {
             .unwrap();
             assert!(
                 !bad_resp.matches("mem-1", op),
+                "{op_name} must reject swapped worktreeId"
+            );
+        }
+    }
+
+    #[test]
+    fn all_planner_variants_round_trip_and_match_scope() {
+        let project_id = "a".repeat(64);
+        let binding_id = "b".repeat(64);
+        let worktree_id = "c".repeat(64);
+        let sha256 = "e".repeat(64);
+        let other_id = "9".repeat(64);
+
+        let scope_json = || {
+            serde_json::json!({
+                "projectId": project_id,
+                "bindingId": binding_id,
+                "worktreeId": worktree_id
+            })
+        };
+
+        let cases = [
+            (
+                "planner.explore",
+                serde_json::json!({
+                    "operation": "planner.explore",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "watchedPaths": ["README.md"]
+                }),
+            ),
+            (
+                "planner.planCreate",
+                serde_json::json!({
+                    "operation": "planner.planCreate",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "requestId": "req-plan-1",
+                    "title": "Plano",
+                    "objective": "Editar README",
+                    "operationKind": "worktree_edit",
+                    "backendMode": "mock_supervised",
+                    "targetPaths": ["README.md"]
+                }),
+            ),
+            (
+                "planner.planList",
+                serde_json::json!({
+                    "operation": "planner.planList",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id
+                }),
+            ),
+            (
+                "planner.planPreflight",
+                serde_json::json!({
+                    "operation": "planner.planPreflight",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "planId": "plan-1"
+                }),
+            ),
+            (
+                "planner.grantIssue",
+                serde_json::json!({
+                    "operation": "planner.grantIssue",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "planId": "plan-1",
+                    "expectedBaseDigest": sha256,
+                    "backendMode": "mock_supervised",
+                    "allowedEffects": ["create_worktree", "write_worktree"],
+                    "humanConfirmed": true
+                }),
+            ),
+            (
+                "planner.grantList",
+                serde_json::json!({
+                    "operation": "planner.grantList",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "planId": "plan-1"
+                }),
+            ),
+            (
+                "planner.grantRevoke",
+                serde_json::json!({
+                    "operation": "planner.grantRevoke",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "grantId": "grant-1",
+                    "reason": "manual"
+                }),
+            ),
+            (
+                "planner.boundaryStatus",
+                serde_json::json!({
+                    "operation": "planner.boundaryStatus",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id
+                }),
+            ),
+            (
+                "planner.executionStart",
+                serde_json::json!({
+                    "operation": "planner.executionStart",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "requestId": "req-exec-1",
+                    "planId": "plan-1",
+                    "grantId": "grant-1",
+                    "expectedBaseDigest": sha256,
+                    "mockBehavior": "complete"
+                }),
+            ),
+            (
+                "planner.executionList",
+                serde_json::json!({
+                    "operation": "planner.executionList",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id
+                }),
+            ),
+            (
+                "planner.executionEvents",
+                serde_json::json!({
+                    "operation": "planner.executionEvents",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "executionId": "exec-1",
+                    "afterSeq": 0
+                }),
+            ),
+            (
+                "planner.executionCancel",
+                serde_json::json!({
+                    "operation": "planner.executionCancel",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "executionId": "exec-1",
+                    "humanConfirmed": true
+                }),
+            ),
+            (
+                "planner.worktreeCleanup",
+                serde_json::json!({
+                    "operation": "planner.worktreeCleanup",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "executionId": "exec-1",
+                    "humanConfirmed": true
+                }),
+            ),
+            (
+                "planner.diffGet",
+                serde_json::json!({
+                    "operation": "planner.diffGet",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "executionId": "exec-1"
+                }),
+            ),
+            (
+                "planner.diffReview",
+                serde_json::json!({
+                    "operation": "planner.diffReview",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "requestId": "req-rev-1",
+                    "executionId": "exec-1",
+                    "expectedDiffDigest": sha256,
+                    "expectedRevision": 0,
+                    "choice": "approved",
+                    "reviewer": "operador",
+                    "note": "Conferido",
+                    "humanConfirmed": true
+                }),
+            ),
+            (
+                "planner.applyLocal",
+                serde_json::json!({
+                    "operation": "planner.applyLocal",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "requestId": "req-apply-1",
+                    "executionId": "exec-1",
+                    "grantId": "grant-1",
+                    "expectedDiffDigest": sha256,
+                    "applyConfirmed": true
+                }),
+            ),
+            (
+                "planner.verifierDefine",
+                serde_json::json!({
+                    "operation": "planner.verifierDefine",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "definitionId": "verif-node",
+                    "label": "Node",
+                    "argv": ["node", "--version"],
+                    "cwdRelative": ".",
+                    "envWhitelist": ["NODE_ENV"],
+                    "timeoutMs": 5000,
+                    "privilegeProfile": "readonly_check"
+                }),
+            ),
+            (
+                "planner.verifierList",
+                serde_json::json!({
+                    "operation": "planner.verifierList",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id
+                }),
+            ),
+            (
+                "planner.verifierApprove",
+                serde_json::json!({
+                    "operation": "planner.verifierApprove",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "definitionId": "verif-node",
+                    "expectedDefinitionDigest": sha256,
+                    "reviewer": "operador",
+                    "humanConfirmed": true
+                }),
+            ),
+            (
+                "planner.verifierRun",
+                serde_json::json!({
+                    "operation": "planner.verifierRun",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "requestId": "req-run-1",
+                    "definitionId": "verif-node",
+                    "expectedDefinitionDigest": sha256
+                }),
+            ),
+        ];
+
+        for (op_name, req_json) in cases {
+            let req: PlannerRequest = serde_json::from_value(req_json.clone()).unwrap();
+            let op = Operation::Planner(&req);
+            assert_eq!(op.name(), op_name);
+            assert_eq!(serde_json::to_value(op).unwrap(), req_json);
+
+            let mut extra = req_json;
+            extra["unexpectedField"] = true.into();
+            assert!(serde_json::from_value::<PlannerRequest>(extra).is_err());
+
+            let ok_resp: Response = serde_json::from_value(serde_json::json!({
+                "version": VERSION,
+                "id": "plan-1",
+                "ok": true,
+                "operation": op_name,
+                "data": { "scope": scope_json() }
+            }))
+            .unwrap();
+            assert!(
+                ok_resp.matches("plan-1", op),
+                "{op_name} should match scope"
+            );
+
+            let bad_resp: Response = serde_json::from_value(serde_json::json!({
+                "version": VERSION,
+                "id": "plan-1",
+                "ok": true,
+                "operation": op_name,
+                "data": {
+                    "scope": {
+                        "projectId": project_id,
+                        "bindingId": binding_id,
+                        "worktreeId": other_id
+                    }
+                }
+            }))
+            .unwrap();
+            assert!(
+                !bad_resp.matches("plan-1", op),
                 "{op_name} must reject swapped worktreeId"
             );
         }

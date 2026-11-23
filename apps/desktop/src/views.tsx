@@ -20,6 +20,7 @@ import { EmptyState } from "./WorkView";
 import type { Theme } from "./appearance";
 import { WorkingTreeView } from "./WorkingTreeView";
 import { MemoryWorkspaceView } from "./MemoryWorkspaceView";
+import { PlannerSupervisionView } from "./PlannerSupervisionView";
 import type { createDesktopClient } from "./ipc";
 
 export type ServiceStatus =
@@ -384,6 +385,7 @@ export function ProjectView({
   workingClient,
   decisionClient,
   memoryClient,
+  plannerClient,
   onResumeUpdated,
   section,
   taskProposal,
@@ -410,6 +412,7 @@ export function ProjectView({
   workingClient: ReturnType<typeof createDesktopClient>["working"];
   decisionClient: ReturnType<typeof createDesktopClient>["decisions"];
   memoryClient: ReturnType<typeof createDesktopClient>["memory"];
+  plannerClient: ReturnType<typeof createDesktopClient>["planner"];
   onResumeUpdated: () => void;
   section: ProjectSection;
   taskProposal?: TaskProposal;
@@ -513,6 +516,14 @@ export function ProjectView({
           projectName={project.name}
           scope={resume?.scope ?? identity?.scope ?? null}
           client={memoryClient}
+        />
+      ) : section === "planner" ? (
+        <PlannerSupervisionView
+          key={`${project.id}/${project.root}`}
+          projectId={project.id}
+          projectName={project.name}
+          scope={resume?.scope ?? identity?.scope ?? null}
+          client={plannerClient}
         />
       ) : section === "context" ? (
         <ContextView

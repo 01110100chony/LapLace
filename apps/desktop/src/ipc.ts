@@ -48,6 +48,19 @@ import {
   type TimelineInput,
   type WorkingLayer,
   type WorkingRef,
+  type PlannerExploreInput,
+  type PlanCreateInput,
+  type PlanPreflightInput,
+  type OperationGrantIssueInput,
+  type OperationGrantRevokeInput,
+  type SupervisedExecutionStartInput,
+  type SupervisedExecutionCancelInput,
+  type WorktreeCleanupInput,
+  type ExecutionReviewInput,
+  type ApplyLocalInput,
+  type VerifierDefineInput,
+  type VerifierApproveInput,
+  type VerifierRunInput,
 } from "@laplace/contracts";
 
 type DesktopCommand =
@@ -74,7 +87,8 @@ type DesktopCommand =
   | "working_request"
   | "resume_request"
   | "compiler_request"
-  | "memory_request";
+  | "memory_request"
+  | "planner_request";
 type PickerOperation =
   "workspace.addLocal" | "project.relocate" | "clone.start";
 type DesktopOperation = Exclude<Operation, "codex.approval" | "clone.prepare">;
@@ -131,6 +145,26 @@ const commands: Record<DesktopOperation, DesktopCommand> = {
   "memory.overlayList": "memory_request",
   "memory.overlayVerify": "memory_request",
   "memory.overlayReconstruct": "memory_request",
+  "planner.explore": "planner_request",
+  "planner.planCreate": "planner_request",
+  "planner.planList": "planner_request",
+  "planner.planPreflight": "planner_request",
+  "planner.grantIssue": "planner_request",
+  "planner.grantList": "planner_request",
+  "planner.grantRevoke": "planner_request",
+  "planner.boundaryStatus": "planner_request",
+  "planner.executionStart": "planner_request",
+  "planner.executionList": "planner_request",
+  "planner.executionEvents": "planner_request",
+  "planner.executionCancel": "planner_request",
+  "planner.worktreeCleanup": "planner_request",
+  "planner.diffGet": "planner_request",
+  "planner.diffReview": "planner_request",
+  "planner.applyLocal": "planner_request",
+  "planner.verifierDefine": "planner_request",
+  "planner.verifierList": "planner_request",
+  "planner.verifierApprove": "planner_request",
+  "planner.verifierRun": "planner_request",
   "context.browse": "context_browse",
   "context.capture": "context_capture",
   "context.list": "context_list",
@@ -201,13 +235,16 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
           command === "working_request" ||
           command === "resume_request" ||
           command === "compiler_request" ||
-          command === "memory_request"
+          command === "memory_request" ||
+          command === "planner_request"
           ? { id, request: { operation, ...args } }
           : { ...args, id },
       );
       // The native picker may stay open as long as the user needs.
       const response =
-        picker || operation === "codex.start"
+        picker ||
+        operation === "codex.start" ||
+        operation === "planner.verifierRun"
           ? await call
           : await Promise.race([
               call,
@@ -264,7 +301,8 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
             throw new DesktopError("invalid_response");
         } else if (
           operation === "compiler.compile" ||
-          operation.startsWith("memory.")
+          operation.startsWith("memory.") ||
+          operation.startsWith("planner.")
         ) {
           // Scope validation above already verifies IdentityScope on F2/F3 responses.
         } else if (
@@ -735,6 +773,57 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
         return result;
       },
     },
+    planner: {
+      explore: (input: PlannerExploreInput) =>
+        request("planner.explore", input),
+      planCreate: (input: PlanCreateInput) =>
+        request("planner.planCreate", input),
+      planList: (scope: IdentityScope) => request("planner.planList", scope),
+      planPreflight: (input: PlanPreflightInput) =>
+        request("planner.planPreflight", input),
+      grantIssue: (input: OperationGrantIssueInput) =>
+        request("planner.grantIssue", input),
+      grantList: (scope: IdentityScope, planId?: string) =>
+        request(
+          "planner.grantList",
+          planId === undefined ? scope : { ...scope, planId },
+        ),
+      grantRevoke: (input: OperationGrantRevokeInput) =>
+        request("planner.grantRevoke", input),
+      boundaryStatus: (scope: IdentityScope) =>
+        request("planner.boundaryStatus", scope),
+      executionStart: (input: SupervisedExecutionStartInput) =>
+        request("planner.executionStart", input),
+      executionList: (scope: IdentityScope, planId?: string) =>
+        request(
+          "planner.executionList",
+          planId === undefined ? scope : { ...scope, planId },
+        ),
+      executionEvents: (
+        scope: IdentityScope,
+        executionId: string,
+        afterSeq: number,
+      ) =>
+        request("planner.executionEvents", { ...scope, executionId, afterSeq }),
+      executionCancel: (input: SupervisedExecutionCancelInput) =>
+        request("planner.executionCancel", input),
+      worktreeCleanup: (input: WorktreeCleanupInput) =>
+        request("planner.worktreeCleanup", input),
+      diffGet: (scope: IdentityScope, executionId: string) =>
+        request("planner.diffGet", { ...scope, executionId }),
+      diffReview: (input: ExecutionReviewInput) =>
+        request("planner.diffReview", input),
+      applyLocal: (input: ApplyLocalInput) =>
+        request("planner.applyLocal", input),
+      verifierDefine: (input: VerifierDefineInput) =>
+        request("planner.verifierDefine", input),
+      verifierList: (scope: IdentityScope) =>
+        request("planner.verifierList", scope),
+      verifierApprove: (input: VerifierApproveInput) =>
+        request("planner.verifierApprove", input),
+      verifierRun: (input: VerifierRunInput) =>
+        request("planner.verifierRun", input),
+    },
   };
 }
 
@@ -867,6 +956,28 @@ const messages: Record<ErrorCode, string> = {
     "Um blob obrigatório do CAS para reconstruir o Dirty Overlay está ausente ou corrompido.",
   overlay_unsafe_target:
     "O destino de reconstrução exige confirmação explícita e deve ficar fora de projetos e do catálogo.",
+  planner_invalid_input:
+    "Os parâmetros de planejamento ou verificação F4 são inválidos.",
+  planner_not_found:
+    "O plano, execução, diff ou verificador solicitado não foi encontrado neste escopo.",
+  planner_drift_detected:
+    "A base Git ou o digest mudou desde o plano; refaça o Pre-Flight antes de executar.",
+  planner_worktree_unavailable:
+    "A worktree dedicada não está disponível ou a execução ainda está ativa.",
+  operation_grant_invalid:
+    "A concessão de operação é inválida, foi revogada ou não cobre este efeito.",
+  operation_grant_expired:
+    "A concessão de operação expirou; emita uma nova concessão com confirmação humana.",
+  execution_backend_blocked:
+    "Este backend ou perfil de privilégio está bloqueado pela política de isolamento LPAC.",
+  execution_interrupted:
+    "A execução supervisionada foi interrompida e não será reexecutada automaticamente.",
+  apply_not_approved:
+    "A aplicação local exige revisão aprovada, concessão apply_local e confirmação humana explícita.",
+  apply_conflict_detected:
+    "Conflito ou falha parcial detectada na aplicação local (OCC); alterações do usuário foram preservadas.",
+  verifier_approval_invalid:
+    "A aprovação do verificador é inexistente ou foi revogada automaticamente pela alteração do comando.",
   context_source_unavailable:
     "A fonte preservada está indisponível ou não passou na verificação de integridade.",
 };

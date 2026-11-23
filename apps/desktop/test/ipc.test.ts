@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { protocolVersion, type ContextHistory } from "@laplace/contracts";
-import { createDesktopClient } from "../src/ipc.ts";
+import { createDesktopClient, DesktopError, errorMessage } from "../src/ipc.ts";
 import { createLatestRequest } from "../src/workspace.ts";
 
 test("correlaciona operação e ID e devolve a resposta do health check", async () => {
@@ -707,5 +707,75 @@ test("encapsula operações F3 (memory.*) em memory_request e valida escopo e er
   assert.match(
     errorMessage(new DesktopError("pin_protected")),
     /última prova ativa/,
+  );
+});
+
+test("roteia operacoes planner.* pelo comando planner_request e rejeita resposta cross-scope", async () => {
+  const scope = {
+    projectId: "a".repeat(64),
+    bindingId: "1".repeat(64),
+    worktreeId: "2".repeat(64),
+  };
+  let corruptScope = false;
+
+  const client = createDesktopClient(async (command, args) => {
+    assert.equal(command, "planner_request");
+    const req = args.request as Record<string, unknown>;
+    const op = req.operation as string;
+    const respScope = corruptScope
+      ? { ...scope, worktreeId: "9".repeat(64) }
+      : scope;
+
+    if (op === "planner.boundaryStatus") {
+      return {
+        version: protocolVersion,
+        id: args.id,
+        ok: true,
+        operation: op,
+        data: {
+          scope: respScope,
+          checkedAt: "2026-11-23T12:00:00.000Z",
+          lpacVerified: false,
+          lpacDetail: "0xc0000142",
+          strictBackendAllowed: false,
+          supervisionHelperAvailable: true,
+          backends: [
+            {
+              mode: "mock_supervised",
+              available: true,
+              verified: true,
+              blockedReason: null,
+            },
+          ],
+        },
+      };
+    }
+    if (op === "planner.planList") {
+      return {
+        version: protocolVersion,
+        id: args.id,
+        ok: true,
+        operation: op,
+        data: { scope: respScope, items: [] },
+      };
+    }
+    assert.fail(`unexpected op: ${op}`);
+  });
+
+  const boundary = await client.planner.boundaryStatus(scope);
+  assert.equal(boundary.lpacVerified, false);
+
+  corruptScope = true;
+  await assert.rejects(client.planner.planList(scope), {
+    code: "invalid_response",
+  });
+
+  assert.match(
+    errorMessage(new DesktopError("execution_backend_blocked")),
+    /LPAC/,
+  );
+  assert.match(
+    errorMessage(new DesktopError("verifier_approval_invalid")),
+    /revogada automaticamente/,
   );
 });
