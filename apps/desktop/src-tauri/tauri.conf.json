@@ -30,7 +30,11 @@
   "bundle": {
     "active": false,
     "icon": ["icons/icon.ico"],
-    "externalBin": ["generated/laplace-node", "generated/laplace-git-job"],
+    "externalBin": [
+      "generated/laplace-node",
+      "generated/laplace-git-job",
+      "generated/laplace-codex-job"
+    ],
     "resources": {
       "generated/service.cjs": "sidecar/service.cjs",
       "generated/mcp-gateway.cjs": "sidecar/mcp-gateway.cjs",

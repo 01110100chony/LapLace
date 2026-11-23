@@ -20,11 +20,15 @@ type Terminal = Extract<CodexRunEvent, { type: "terminal" }>;
 
 export class TaskSupervisor {
   private readonly owner = { id: randomUUID(), pid: process.pid };
-  private active: Active | undefined;
+  private readonly active = new Map<string, Active>();
   private readonly scenario: CodexMockScenario | undefined;
 
   constructor(scenario: CodexMockScenario | undefined) {
     this.scenario = scenario;
+  }
+
+  private keyFor(ref: TaskRunRef) {
+    return `${ref.projectId}:${ref.taskId}:${ref.executionId}`;
   }
 
   latest(scope: TaskScope, store: Store) {
@@ -38,28 +42,42 @@ export class TaskSupervisor {
       scenario ? this.owner : undefined,
     );
     if (created && scenario) {
-      this.active?.controller.abort();
-      const active: Active = { execution, controller: new AbortController() };
-      this.active = active;
-      active.completion = this.run(active, scenario, store, protectedRoots);
+      const controller = new AbortController();
+      const active: Active = { execution, controller };
+      const key = this.keyFor(execution);
+      this.active.get(key)?.controller.abort();
+      this.active.set(key, active);
+      active.completion = this.run(
+        active,
+        key,
+        scenario,
+        store,
+        protectedRoots,
+      );
     }
     return execution;
   }
 
   cancel(ref: TaskRunRef, store: Store) {
     const execution = store.cancel(ref);
-    if (this.active?.execution.executionId === execution.executionId)
-      this.active.controller.abort();
+    this.active.get(this.keyFor(execution))?.controller.abort();
     return execution;
   }
 
   close() {
-    this.active?.controller.abort();
-    return this.active?.completion;
+    const pending: Promise<void>[] = [];
+    for (const entry of this.active.values()) {
+      entry.controller.abort();
+      if (entry.completion) pending.push(entry.completion);
+    }
+    return pending.length > 0
+      ? Promise.all(pending).then(() => undefined)
+      : undefined;
   }
 
   private async run(
     active: Active,
+    key: string,
     scenario: CodexMockScenario,
     store: Store,
     protectedRoots: string[],
@@ -118,7 +136,7 @@ export class TaskSupervisor {
           }
         }
       }
-      if (this.active === active) this.active = undefined;
+      if (this.active.get(key) === active) this.active.delete(key);
     }
   }
 }

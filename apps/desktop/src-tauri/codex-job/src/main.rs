@@ -1,6 +1,9 @@
 #[cfg(not(feature = "clone-only"))]
 mod confinement;
+#[cfg(feature = "clone-only")]
 mod managed_clone;
+#[cfg(not(feature = "clone-only"))]
+mod verifier_job;
 mod win_process;
 
 use std::{
@@ -58,6 +61,7 @@ fn main() {
         Some(mode) if mode == OsStr::new("--laplace-codex-boundary-read") => {
             process::exit(confinement::read_controls());
         }
+        #[cfg(feature = "clone-only")]
         Some(mode) if mode == OsStr::new("--laplace-clone-job") => {
             let pid = args.next().and_then(|value| value.to_str()?.parse().ok());
             if let (Some(pid), Some(executable)) = (pid, args.next()) {
@@ -65,6 +69,17 @@ fn main() {
                     Ok(code) => process::exit(code),
                     Err(error) => eprintln!("[laplace:clone] job_failed ({:?})", error.kind()),
                 }
+            }
+            process::exit(126);
+        }
+        #[cfg(not(feature = "clone-only"))]
+        Some(mode) if mode == OsStr::new("--laplace-verifier-job") => {
+            match verifier_job::parse_args(args) {
+                Ok(command_spec) => match verifier_job::run(command_spec) {
+                    Ok(code) => process::exit(code),
+                    Err(error) => eprintln!("[laplace:verifier] job_failed ({:?})", error.kind()),
+                },
+                Err(error) => eprintln!("[laplace:verifier] invalid_args ({:?})", error.kind()),
             }
             process::exit(126);
         }
@@ -142,4 +157,40 @@ fn create_job(limits: &JOBOBJECT_EXTENDED_LIMIT_INFORMATION) -> io::Result<Owned
         return Err(io::Error::last_os_error());
     }
     Ok(job)
+}
+
+pub(crate) fn mode_supported(mode: &str) -> bool {
+    if cfg!(feature = "clone-only") {
+        mode == "--laplace-clone-job"
+    } else {
+        matches!(
+            mode,
+            "--laplace-codex-boundary-probe"
+                | "--laplace-codex-boundary-read"
+                | "--laplace-codex-job"
+                | "--laplace-verifier-job"
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mode_supported;
+
+    #[test]
+    fn helper_binaries_enforce_mutually_exclusive_modes() {
+        if cfg!(feature = "clone-only") {
+            assert!(mode_supported("--laplace-clone-job"));
+            assert!(!mode_supported("--laplace-codex-job"));
+            assert!(!mode_supported("--laplace-verifier-job"));
+            assert!(!mode_supported("--laplace-codex-boundary-probe"));
+            assert!(!mode_supported("--laplace-codex-boundary-read"));
+        } else {
+            assert!(!mode_supported("--laplace-clone-job"));
+            assert!(mode_supported("--laplace-codex-job"));
+            assert!(mode_supported("--laplace-verifier-job"));
+            assert!(mode_supported("--laplace-codex-boundary-probe"));
+            assert!(mode_supported("--laplace-codex-boundary-read"));
+        }
+    }
 }

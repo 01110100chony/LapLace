@@ -298,6 +298,11 @@ pub fn probe(cli: Option<&Path>) -> io::Result<()> {
                 "external read returned a result other than access denied",
             ))
         }
+        0xc000_0142 => {
+            return Err(io::Error::other(
+                "controls exited with 0xc0000142 (STATUS_DLL_INIT_FAILED under LPAC child initialization; no ACLs relaxed)",
+            ))
+        }
         _ => {
             return Err(io::Error::other(format!(
                 "controls exited with 0x{controls:08x}"

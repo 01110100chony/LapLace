@@ -4,13 +4,20 @@ use std::{
     io,
     os::windows::{ffi::OsStrExt, io::OwnedHandle},
     path::Path,
-    ptr,
+    ptr, thread,
+    time::{Duration, Instant},
 };
 use windows_sys::Win32::{
     Foundation::{DuplicateHandle, DUPLICATE_SAME_ACCESS, HANDLE, INVALID_HANDLE_VALUE},
-    System::Threading::{
-        DeleteProcThreadAttributeList, GetCurrentProcess, InitializeProcThreadAttributeList,
-        UpdateProcThreadAttribute, LPPROC_THREAD_ATTRIBUTE_LIST,
+    System::{
+        JobObjects::{
+            JobObjectBasicAccountingInformation, QueryInformationJobObject, TerminateJobObject,
+            JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
+        },
+        Threading::{
+            DeleteProcThreadAttributeList, GetCurrentProcess, InitializeProcThreadAttributeList,
+            UpdateProcThreadAttribute, LPPROC_THREAD_ATTRIBUTE_LIST,
+        },
     },
 };
 
@@ -117,6 +124,35 @@ pub(crate) fn command_line(executable: &Path, args: &[&str]) -> Vec<u16> {
     }
     command.push(0);
     command
+}
+
+pub(crate) fn drain_job(job: HANDLE, exit_code: u32) -> io::Result<()> {
+    if unsafe { TerminateJobObject(job, exit_code) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let mut info = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+        if unsafe {
+            QueryInformationJobObject(
+                job,
+                JobObjectBasicAccountingInformation,
+                ptr::from_mut(&mut info).cast(),
+                size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
+                ptr::null_mut(),
+            )
+        } == 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        if info.ActiveProcesses == 0 {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(io::ErrorKind::TimedOut.into());
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
 }
 
 #[cfg(test)]

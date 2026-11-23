@@ -36,6 +36,7 @@ import { createDecisionStore, decisionMigration } from "./decision-store.ts";
 import { createF2Store, f2Migration } from "./f2-store.ts";
 import { createCasStore } from "./cas-store.ts";
 import { createF3Store, f3Migration } from "./f3-store.ts";
+import { createF4Store, f4Migration } from "./f4-store.ts";
 
 const migrations = [
   `CREATE TABLE projects (
@@ -69,6 +70,7 @@ const migrations = [
   decisionMigration,
   f2Migration,
   f3Migration,
+  f4Migration,
 ];
 
 export const catalogSchemaVersion = migrations.length;
@@ -276,6 +278,8 @@ export function openCatalog(dataDir: string) {
     const f3 = createF3Store(database, dataDir, write, read, identity, cas);
     f3.reconcileTombstones();
     const f2 = createF2Store(database, write, read, identity);
+    const f4 = createF4Store(database, write, read, identity);
+    f4.reconcileInterruptedExecutions(new Date().toISOString());
     const codexHistory = createCodexHistory(database, context);
     return {
       identity,
@@ -286,6 +290,7 @@ export function openCatalog(dataDir: string) {
       cas,
       f3,
       f2,
+      f4,
       codexHistory,
       tasks: createTaskStore(database, write, codexHistory),
       executions: createTaskExecutionStore(

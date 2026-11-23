@@ -152,7 +152,10 @@ const builtJob = join(jobTarget, target, "release", "laplace-codex-job.exe");
 buildJob(["--features", "clone-only"]);
 await copyFile(builtJob, join(output, "laplace-git-job-" + target + ".exe"));
 
-if (development && process.env.LAPLACE_CODEX_DEV === "workspace") {
+buildJob();
+await copyFile(builtJob, join(output, "laplace-codex-job-" + target + ".exe"));
+
+if (development) {
   const manifest = fileURLToPath(
     new URL("../src-tauri/Cargo.toml", import.meta.url),
   );
@@ -170,7 +173,6 @@ if (development && process.env.LAPLACE_CODEX_DEV === "workspace") {
       { encoding: "utf8" },
     ),
   );
-  buildJob();
   for (const dir of [
     join(desktopTarget, target, "debug"),
     join(desktopTarget, "debug"),

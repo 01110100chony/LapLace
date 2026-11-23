@@ -29,6 +29,8 @@ import { createBitemporalService } from "./bitemporal-service.ts";
 import { createPinPurgeService } from "./pin-purge-service.ts";
 import { createInboxExportService } from "./inbox-export-service.ts";
 import { createDirtyOverlayService } from "./dirty-overlay-service.ts";
+import { PlannerSupervisor } from "./planner-supervisor.ts";
+import { createPlannerService } from "./planner-service.ts";
 
 // Defined when the sidecar is bundled. The source entry point and the
 // distribution bundle ignore all development arguments.
@@ -44,13 +46,31 @@ function developmentFromHost([mode, value]: string[]):
     return { mode: "unconfined_workspace_development", helper: value };
 }
 
+function parseHostArgv(argv: string[]) {
+  const afterData = argv.slice(isAbsolute(argv[3] ?? "") ? 4 : 3);
+  let supervisionHelper: string | undefined;
+  const remaining: string[] = [];
+  for (let i = 0; i < afterData.length; i++) {
+    if (
+      afterData[i] === "--supervision-helper" &&
+      i + 1 < afterData.length &&
+      isAbsolute(afterData[i + 1]!)
+    ) {
+      supervisionHelper = afterData[i + 1];
+      i += 1;
+      continue;
+    }
+    remaining.push(afterData[i]!);
+  }
+  return { supervisionHelper, remaining };
+}
+
+const hostArgs = parseHostArgv(process.argv);
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
 const exit = new AbortController();
 const development =
   typeof __LAPLACE_DEVELOPMENT__ !== "undefined" && __LAPLACE_DEVELOPMENT__
-    ? developmentFromHost(
-        process.argv.slice(isAbsolute(process.argv[3] ?? "") ? 4 : 3),
-      )
+    ? developmentFromHost(hostArgs.remaining)
     : undefined;
 const codex = new CodexQueries({ development });
 const cloneHelper = process.argv[3];
@@ -66,6 +86,7 @@ input.once("close", () => {
   exit.abort();
   void codex.close();
   void supervisor.close();
+  void plannerSupervisor.close();
   void clones.close();
 });
 const dataDir = process.argv[2] ?? "";
@@ -138,6 +159,27 @@ const dirtyOverlayService = createDirtyOverlayService({
   withCatalog,
   contextOptions,
   dataDir,
+});
+const plannerSupervisor = new PlannerSupervisor({
+  withCatalog,
+  grants: grantService,
+  supervisionHelper: hostArgs.supervisionHelper,
+  dataDir,
+  mcpEntry,
+  protectedRoots: () => [
+    dataDir,
+    ...withCatalog((store) => store.list().projects.map(({ root }) => root)),
+  ],
+});
+const plannerService = createPlannerService({
+  withCatalog,
+  dirtyOverlayService,
+  supervisor: plannerSupervisor,
+  supervisionHelper: hostArgs.supervisionHelper,
+  protectedRoots: () => [
+    dataDir,
+    ...withCatalog((store) => store.list().projects.map(({ root }) => root)),
+  ],
 });
 
 async function respond(line: string): Promise<Response> {
@@ -476,6 +518,90 @@ async function respond(line: string): Promise<Response> {
       const data = dirtyOverlayService.reconstruct(request);
       return { ...envelope, operation: request.operation, ok: true, data };
     }
+    if (request.operation === "planner.explore") {
+      const data = await plannerService.explore(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "planner.planCreate") {
+      const data = await plannerService.planCreate(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "planner.planList") {
+      const data = plannerService.planList(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "planner.planPreflight") {
+      const data = await plannerService.planPreflight(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "planner.grantIssue") {
+      const data = await plannerService.grantIssue(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "planner.grantList") {
+      const data = plannerService.grantList(request, request.planId);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "planner.grantRevoke") {
+      const data = plannerService.grantRevoke(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "planner.boundaryStatus") {
+      const data = plannerService.boundaryStatus(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "planner.executionStart") {
+      const data = await plannerService.executionStart(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "planner.executionList") {
+      const data = plannerService.executionList(request, request.planId);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "planner.executionEvents") {
+      const data = plannerService.executionEvents(
+        request,
+        request.executionId,
+        request.afterSeq,
+      );
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "planner.executionCancel") {
+      const data = plannerService.executionCancel(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "planner.worktreeCleanup") {
+      const data = await plannerService.worktreeCleanup(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "planner.diffGet") {
+      const data = plannerService.diffGet(request, request.executionId);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "planner.diffReview") {
+      const data = plannerService.diffReview(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "planner.applyLocal") {
+      const data = await plannerService.applyLocal(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "planner.verifierDefine") {
+      const data = plannerService.verifierDefine(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "planner.verifierList") {
+      const data = plannerService.verifierList(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "planner.verifierApprove") {
+      const data = plannerService.verifierApprove(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "planner.verifierRun") {
+      const data = await plannerService.verifierRun(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
     const project = withCatalog((store) => store.lookup(request.projectId));
     switch (request.operation) {
       case "working.list": {
@@ -784,7 +910,12 @@ async function serve() {
 
 void serve()
   .finally(async () => {
-    await Promise.all([codex.close(), supervisor.close(), clones.close()]);
+    await Promise.all([
+      codex.close(),
+      supervisor.close(),
+      plannerSupervisor.close(),
+      clones.close(),
+    ]);
     catalog?.close();
   })
   .catch(() => {
