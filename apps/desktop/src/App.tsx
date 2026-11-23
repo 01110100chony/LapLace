@@ -332,7 +332,7 @@ export function App() {
           : "Área de trabalho";
 
   return (
-    <div className="frame living-shell">
+    <div className="frame living-shell" data-motion-paused={paused}>
       <a className="skip-link" href="#content">
         Ir para o conteúdo
       </a>

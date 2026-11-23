@@ -77,38 +77,82 @@ export function Home({
 
   return (
     <div className="workspace-view workspace-dashboard">
+      <header className="workspace-masthead">
+        <div className="masthead-copy">
+          <p className="eyebrow">LapLace</p>
+          <h1>Área de trabalho</h1>
+          <p>Retome seus projetos a partir da última leitura do checkout.</p>
+          <div className="work-actions">
+            <button
+              type="button"
+              className="button primary"
+              disabled={!ready}
+              onClick={add}
+            >
+              <VisualIcon name="plus" /> Adicionar projeto
+            </button>
+            <button
+              type="button"
+              className="button"
+              disabled={!ready}
+              onClick={clone}
+            >
+              <VisualIcon name="download" /> Clonar do GitHub
+            </button>
+          </div>
+        </div>
+        <SpectralField
+          theme={theme}
+          paused={paused}
+          phase={spectralPhase}
+          scene="workspace"
+        />
+      </header>
+
       <div className="workspace-flow">
-        <header className="workspace-masthead">
-          <div className="masthead-copy">
-            <p className="eyebrow">Workspace local</p>
-            <h1>Área de trabalho</h1>
-            <p>Projetos, evidências e o próximo passo de cada checkout.</p>
-            <div className="work-actions">
+        <section className="dashboard-panel desk-section desk-resume">
+          <header className="dashboard-heading">
+            <VisualIcon name="overview" />
+            <h2>Continue de onde parou</h2>
+          </header>
+          {recent ? (
+            <>
+              <p className="desk-project-name">{recent.name}</p>
+              {recentSummary ? (
+                <>
+                  <p className="desk-branch">
+                    <VisualIcon name="git" />{" "}
+                    <code>{branchLabel(recentSummary)}</code>
+                  </p>
+                  <p className="desk-changes">
+                    {recentSummary.changes.staged} no índice ·{" "}
+                    {recentSummary.changes.unstaged} no disco ·{" "}
+                    {recentSummary.changes.untracked} sem rastreio
+                    {recentSummary.changes.conflicted > 0 && (
+                      <> · {recentSummary.changes.conflicted} em conflito</>
+                    )}
+                  </p>
+                  <p className="work-muted">
+                    Observado em <ObservedTime summary={recentSummary} />
+                  </p>
+                </>
+              ) : (
+                <p className="work-muted">
+                  Abra o projeto para verificar o checkout.
+                </p>
+              )}
               <button
                 type="button"
                 className="button primary"
-                disabled={!ready}
-                onClick={add}
+                onClick={() => open(recent)}
               >
-                <VisualIcon name="plus" /> Adicionar projeto
+                Retomar projeto <VisualIcon name="forward" />
               </button>
-              <button
-                type="button"
-                className="button"
-                disabled={!ready}
-                onClick={clone}
-              >
-                <VisualIcon name="download" /> Clonar do GitHub
-              </button>
-            </div>
-          </div>
-          <SpectralField
-            theme={theme}
-            paused={paused}
-            phase={spectralPhase}
-            scene="workspace"
-          />
-        </header>
+            </>
+          ) : (
+            <p className="work-muted">O último projeto aberto aparece aqui.</p>
+          )}
+        </section>
 
         <section className="project-register" aria-labelledby="local-projects">
           <header className="register-heading dashboard-heading">
@@ -221,50 +265,6 @@ export function Home({
       </div>
 
       <aside className="continuity-desk" aria-label="Retomada e ferramentas">
-        <section className="dashboard-panel desk-section desk-resume">
-          <header className="dashboard-heading">
-            <VisualIcon name="overview" />
-            <h2>Retomada</h2>
-          </header>
-          {recent ? (
-            <>
-              <p className="desk-project-name">{recent.name}</p>
-              {recentSummary ? (
-                <>
-                  <p className="desk-branch">
-                    <VisualIcon name="git" />{" "}
-                    <code>{branchLabel(recentSummary)}</code>
-                  </p>
-                  <p className="desk-changes">
-                    {recentSummary.changes.staged} no índice ·{" "}
-                    {recentSummary.changes.unstaged} no disco ·{" "}
-                    {recentSummary.changes.untracked} sem rastreio
-                    {recentSummary.changes.conflicted > 0 && (
-                      <> · {recentSummary.changes.conflicted} em conflito</>
-                    )}
-                  </p>
-                  <p className="work-muted">
-                    Observado em <ObservedTime summary={recentSummary} />
-                  </p>
-                </>
-              ) : (
-                <p className="work-muted">
-                  Abra o projeto para verificar o checkout.
-                </p>
-              )}
-              <button
-                type="button"
-                className="button primary"
-                onClick={() => open(recent)}
-              >
-                Retomar projeto <VisualIcon name="forward" />
-              </button>
-            </>
-          ) : (
-            <p className="work-muted">O último projeto aberto aparece aqui.</p>
-          )}
-        </section>
-
         <section className="dashboard-panel desk-section">
           <header className="dashboard-heading">
             <VisualIcon name="layers" />
@@ -331,18 +331,42 @@ export function Home({
             <VisualIcon name="chevron" />
           </button>
           <button
-            className="desk-link"
             type="button"
+            className="graph-atlas"
             onClick={() => openLab("graph")}
           >
-            <span className="dashboard-icon">
-              <VisualIcon name="graph" />
+            <span className="atlas-title">
+              <VisualIcon name="graph" /> Explorar KGraph{" "}
+              <VisualIcon name="forward" />
             </span>
-            <span>
-              <strong>KGraph</strong>
-              <small>Decisões, fontes e tarefas</small>
-            </span>
-            <VisualIcon name="chevron" />
+            <svg viewBox="0 0 300 112" aria-hidden="true" focusable="false">
+              <g className="atlas-orbits">
+                <ellipse cx="150" cy="56" rx="59" ry="45" />
+                <ellipse cx="150" cy="56" rx="94" ry="56" />
+              </g>
+              <g className="atlas-links">
+                <path d="M48 28 C98 28 95 56 150 56 S205 24 251 24" />
+                <path d="M150 56 C194 55 180 87 240 87" />
+              </g>
+              <g className="atlas-labels">
+                <circle cx="48" cy="28" r="3" />
+                <text x="48" y="48">
+                  Fontes
+                </text>
+                <circle cx="251" cy="24" r="3" />
+                <text x="251" y="44">
+                  Decisões
+                </text>
+                <circle cx="240" cy="87" r="3" />
+                <text x="240" y="106">
+                  Tarefas
+                </text>
+              </g>
+              <circle className="atlas-hub" cx="150" cy="56" r="21" />
+              <text className="atlas-mark" x="150" y="65">
+                λ
+              </text>
+            </svg>
           </button>
         </section>
       </aside>
