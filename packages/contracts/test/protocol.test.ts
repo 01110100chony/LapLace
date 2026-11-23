@@ -1157,3 +1157,274 @@ test("F2-T01.A1: valida todas as 10 operações compiler.* e rejeita escopo troc
     ),
   );
 });
+
+test("F3-T01.A1: valida todas as 22 operações memory.* e rejeita intervalos invertidos e escopo cruzado", () => {
+  const scope = {
+    projectId: "a".repeat(64),
+    bindingId: "b".repeat(64),
+    worktreeId: "c".repeat(64),
+  };
+  const otherScope = {
+    projectId: "9".repeat(64),
+    bindingId: "b".repeat(64),
+    worktreeId: "c".repeat(64),
+  };
+  const digest = "1".repeat(64);
+  const ts1 = "2026-01-01T00:00:00.000Z";
+  const ts2 = "2026-01-10T00:00:00.000Z";
+  const envelope = { version: 2 as const, id: "req-f3-1" };
+
+  assert.ok(
+    parseRequest({
+      ...envelope,
+      operation: "memory.claimRecord",
+      ...scope,
+      requestId: "req-c1",
+      title: "Claim inicial",
+      content: "Usar RPC stdio.",
+      author: "Autor",
+      reason: "Decisão F3",
+      validFrom: ts1,
+      validTo: null,
+      promoteCanonical: true,
+    }),
+  );
+
+  // Inverted valid interval must be rejected
+  assert.equal(
+    parseRequest({
+      ...envelope,
+      operation: "memory.claimRecord",
+      ...scope,
+      requestId: "req-c-bad",
+      title: "Invertido",
+      content: "Falho.",
+      author: "Autor",
+      reason: "Teste",
+      validFrom: ts2,
+      validTo: ts1,
+    }),
+    undefined,
+  );
+
+  // Validate remaining 21 memory.* request shapes
+  const validRequests = [
+    {
+      operation: "memory.claimCorrect",
+      ...scope,
+      requestId: "req-corr-1",
+      claimId: "claim-1",
+      content: "Correção parcial.",
+      author: "Autor",
+      reason: "Ajuste",
+      correctFrom: ts1,
+      correctTo: ts2,
+    },
+    {
+      operation: "memory.relationRecord",
+      ...scope,
+      fromId: "claim-1",
+      toId: "claim-2",
+      kind: "supports",
+      signalKind: "confirmed_link",
+      rationale: "Sustentado por fonte.",
+      author: "Autor",
+    },
+    {
+      operation: "memory.timeline",
+      ...scope,
+      knownAt: ts2,
+      validAt: ts1,
+      signalKinds: [
+        "confirmed_link",
+        "objective_drift",
+        "inference",
+        "verifier_signal",
+      ],
+    },
+    {
+      operation: "memory.pinCreate",
+      ...scope,
+      label: "Pin fonte",
+      source: { kind: "inline", content: "Bytes preservados no CAS." },
+    },
+    { operation: "memory.pinList", ...scope },
+    { operation: "memory.pinVerify", ...scope, pinId: "pin-1" },
+    {
+      operation: "memory.pinRelease",
+      ...scope,
+      pinId: "pin-1",
+      humanConfirmed: true,
+    },
+    { operation: "memory.gcRun", ...scope, humanConfirmed: true },
+    {
+      operation: "memory.purgeStart",
+      ...scope,
+      targetKind: "claim",
+      targetId: "claim-1",
+      reason: "Expurgo",
+      humanConfirmed: true,
+      maxSteps: 1,
+    },
+    { operation: "memory.purgeResume", ...scope, purgeId: "purge-1" },
+    { operation: "memory.purgeStatus", ...scope, purgeId: "purge-1" },
+    {
+      operation: "memory.inboxSubmit",
+      ...scope,
+      title: "Proposta",
+      content: "Adotar CAS.",
+      targetKind: "claim",
+      originLabel: "Sessão local",
+    },
+    { operation: "memory.inboxList", ...scope },
+    {
+      operation: "memory.inboxReview",
+      ...scope,
+      proposalId: "prop-1",
+      decision: "approve",
+      reviewer: "Autor",
+      note: "Aprovado.",
+      humanConfirmed: true,
+    },
+    {
+      operation: "memory.exportPreview",
+      ...scope,
+      destinationId: "codex_mock",
+      items: [
+        {
+          itemId: "item-1",
+          title: "Nota",
+          visibility: "captured_eligible",
+          content: "Conteúdo seguro",
+        },
+      ],
+    },
+    {
+      operation: "memory.exportExceptionGrant",
+      ...scope,
+      bundleDigest: digest,
+      destinationId: "codex_mock",
+      policyVersion: "f2-policy-v1",
+      reviewer: "Autor",
+      reason: "Teste",
+      humanConfirmed: true,
+    },
+    {
+      operation: "memory.exportExecute",
+      ...scope,
+      destinationId: "codex_mock",
+      policyVersion: "f2-policy-v1",
+      items: [
+        {
+          itemId: "item-1",
+          title: "Nota",
+          visibility: "captured_eligible",
+          content: "Conteúdo seguro",
+        },
+      ],
+    },
+    { operation: "memory.overlayCapture", ...scope, label: "Overlay 1" },
+    { operation: "memory.overlayList", ...scope },
+    { operation: "memory.overlayVerify", ...scope, overlayId: "ov-1" },
+    {
+      operation: "memory.overlayReconstruct",
+      ...scope,
+      overlayId: "ov-1",
+      targetDir: "C:\\temp\\restore",
+      disposableTargetConfirmed: true,
+    },
+  ];
+  for (const req of validRequests) {
+    assert.ok(
+      parseRequest({ ...envelope, ...req }),
+      `Failed parseRequest for ${req.operation}`,
+    );
+  }
+
+  // Response validation + cross-scope rejection on timeline
+  const claimRev = {
+    revisionId: "rev-1",
+    claimId: "claim-1",
+    segmentSeq: 1,
+    txSeq: 1,
+    content: "Usar RPC stdio.",
+    author: "Autor",
+    reason: "Decisão F3",
+    authority: "human_promoted",
+    visibility: "canonical_verified",
+    conflictKey: null,
+    conflictPolarity: null,
+    validFrom: ts1,
+    validTo: null,
+    knownFrom: ts1,
+    knownTo: null,
+    supersedesRevisionId: null,
+    evidenceRef: null,
+    recordedAt: ts1,
+  };
+  assert.ok(
+    isResponse(
+      {
+        ...envelope,
+        ok: true,
+        operation: "memory.timeline",
+        data: {
+          scope,
+          knownAt: ts2,
+          validAt: null,
+          claims: [
+            {
+              claimId: "claim-1",
+              title: "Claim",
+              revision: claimRev,
+              resolvedEvidence: {
+                state: "none",
+                source: "none",
+                digest: null,
+                gapReason: null,
+                textPreview: null,
+              },
+            },
+          ],
+          edges: [],
+          signals: [],
+          conflicts: [],
+        },
+      },
+      envelope.id,
+      "memory.timeline",
+    ),
+  );
+  assert.ok(
+    !isResponse(
+      {
+        ...envelope,
+        ok: true,
+        operation: "memory.timeline",
+        data: {
+          scope,
+          knownAt: ts2,
+          validAt: null,
+          claims: [],
+          edges: [
+            {
+              relationId: "rel-cross",
+              scope: otherScope,
+              fromId: "c1",
+              toId: "c2",
+              kind: "supports",
+              signalKind: "confirmed_link",
+              rationale: "Cruzado",
+              author: "Autor",
+              knownAt: ts1,
+            },
+          ],
+          signals: [],
+          conflicts: [],
+        },
+      },
+      envelope.id,
+      "memory.timeline",
+    ),
+  );
+});

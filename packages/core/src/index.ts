@@ -20,3 +20,14 @@ export {
   sha256Hex,
   utf8ByteLength,
 } from "./hash.ts";
+export {
+  applyPartialCorrection,
+  evaluateExportGovernance,
+  isKnownAt,
+  isValidAt,
+  projectBitemporalState,
+  projectKgraphTimeline,
+  scanExportItems,
+  type PartialCorrectionPlan,
+  type PartialCorrectionSegment,
+} from "./memory.ts";

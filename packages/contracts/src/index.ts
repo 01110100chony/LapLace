@@ -66,6 +66,17 @@ export const errorCodes = [
   "grant_expired",
   "handoff_invalid",
   "audit_unavailable",
+  "memory_invalid_input",
+  "memory_not_found",
+  "memory_conflict",
+  "pin_quota_exceeded",
+  "pin_protected",
+  "purge_in_progress",
+  "export_denied",
+  "export_exception_invalid",
+  "overlay_race_detected",
+  "overlay_blob_missing",
+  "overlay_unsafe_target",
   "clone_unavailable",
   "clone_busy",
   ...cloneFailures,
@@ -113,6 +124,7 @@ export type Results = ContextResults &
   ResumeResults &
   DecisionResults &
   CompilerResults &
+  MemoryResults &
   CloneResults & {
     health: Health;
     "workspace.list": Catalog;
@@ -140,6 +152,7 @@ export type Request = Envelope &
     | ResumeRequests
     | DecisionRequests
     | CompilerRequests
+    | MemoryRequests
     | CloneRequests
   );
 export type Response<K extends Operation = Operation> =
@@ -193,6 +206,8 @@ export function parseRequest(value: unknown): Request | undefined {
   if (decision) return { ...envelope, ...decision };
   const compiler = parseCompilerRequest(value);
   if (compiler) return { ...envelope, ...compiler };
+  const memory = parseMemoryRequest(value);
+  if (memory) return { ...envelope, ...memory };
   if (value.operation === "health") return { ...envelope, operation: "health" };
   if (value.operation === "workspace.list")
     return { ...envelope, operation: "workspace.list" };
@@ -350,6 +365,31 @@ export function isResponse<K extends Operation>(
   )
     return isCompilerResult(operation, value.data);
   if (
+    operation === "memory.claimRecord" ||
+    operation === "memory.claimCorrect" ||
+    operation === "memory.relationRecord" ||
+    operation === "memory.timeline" ||
+    operation === "memory.pinCreate" ||
+    operation === "memory.pinList" ||
+    operation === "memory.pinVerify" ||
+    operation === "memory.pinRelease" ||
+    operation === "memory.gcRun" ||
+    operation === "memory.purgeStart" ||
+    operation === "memory.purgeResume" ||
+    operation === "memory.purgeStatus" ||
+    operation === "memory.inboxSubmit" ||
+    operation === "memory.inboxList" ||
+    operation === "memory.inboxReview" ||
+    operation === "memory.exportPreview" ||
+    operation === "memory.exportExceptionGrant" ||
+    operation === "memory.exportExecute" ||
+    operation === "memory.overlayCapture" ||
+    operation === "memory.overlayList" ||
+    operation === "memory.overlayVerify" ||
+    operation === "memory.overlayReconstruct"
+  )
+    return isMemoryResult(operation, value.data);
+  if (
     operation === "codex.status" ||
     operation === "codex.prepare" ||
     operation === "codex.approval" ||
@@ -457,3 +497,10 @@ import {
   type CompilerResults,
 } from "./context-compiler.ts";
 export * from "./context-compiler.ts";
+import {
+  isMemoryResult,
+  parseMemoryRequest,
+  type MemoryRequests,
+  type MemoryResults,
+} from "./memory.ts";
+export * from "./memory.ts";
