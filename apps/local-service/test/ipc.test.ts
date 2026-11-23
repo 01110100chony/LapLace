@@ -32,7 +32,7 @@ import { CodexQueries, prepareCodex } from "../src/codex.ts";
 import { fixture, git } from "./fixtures/ipc-harness.ts";
 
 const dropIdentitySchema =
-  "DROP TABLE f2_mcp_access_log; DROP TABLE f2_query_audits; DROP TABLE f2_session_grants; DROP TABLE f2_compiled_manifests; DROP TABLE decision_purge_tombstones; DROP TABLE decision_evidence_links; DROP TABLE decision_revisions; DROP TABLE decisions; DROP TABLE worktrees; DROP TABLE local_repo_bindings; DROP TABLE logical_projects;";
+  "DROP TABLE f3_overlay_blobs; DROP TABLE f3_dirty_overlays; DROP TABLE f3_export_audits; DROP TABLE f3_export_exceptions; DROP TABLE f3_local_feedback; DROP TABLE f3_inbox_proposals; DROP TABLE f3_purge_tombstones; DROP TABLE f3_purge_jobs; DROP TABLE f3_cas_pins; DROP TABLE f3_kgraph_edges; DROP TABLE f3_claim_revisions; DROP TABLE f3_claims; DROP TABLE f2_mcp_access_log; DROP TABLE f2_query_audits; DROP TABLE f2_session_grants; DROP TABLE f2_compiled_manifests; DROP TABLE decision_purge_tombstones; DROP TABLE decision_evidence_links; DROP TABLE decision_revisions; DROP TABLE decisions; DROP TABLE worktrees; DROP TABLE local_repo_bindings; DROP TABLE logical_projects;";
 const dropTaskResultSchema = `${dropIdentitySchema} DROP TABLE result_reviews; DROP TABLE working_blobs; DROP TABLE working_snapshots; DROP TABLE task_result_files; DROP TABLE task_results;`;
 const dropExecutionSchema = `
   ${dropTaskResultSchema}

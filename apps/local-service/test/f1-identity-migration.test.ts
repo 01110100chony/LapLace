@@ -49,7 +49,7 @@ test(
       oracle,
     } = built;
 
-    assert.equal(catalogSchemaVersion, 13);
+    assert.equal(catalogSchemaVersion, 14);
 
     // Preserve an untouched v10 backup before the candidate mutates copy.copyDataDir.
     const restoreBackup = await createConsistentCatalogCopy(

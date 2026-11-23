@@ -25,6 +25,10 @@ import { createSessionGrantService } from "./session-grant-store.ts";
 import { createMcpGatewayService } from "./mcp-gateway.ts";
 import { createContextPackageService } from "./context-package.ts";
 import { createAuditQueryService } from "./audit-query-service.ts";
+import { createBitemporalService } from "./bitemporal-service.ts";
+import { createPinPurgeService } from "./pin-purge-service.ts";
+import { createInboxExportService } from "./inbox-export-service.ts";
+import { createDirtyOverlayService } from "./dirty-overlay-service.ts";
 
 // Defined when the sidecar is bundled. The source entry point and the
 // distribution bundle ignore all development arguments.
@@ -126,6 +130,14 @@ const auditQueryService = createAuditQueryService({
     development?.mode === "unconfined_workspace_development"
       ? development.helper
       : undefined,
+});
+const bitemporalService = createBitemporalService({ withCatalog });
+const pinPurgeService = createPinPurgeService({ withCatalog });
+const inboxExportService = createInboxExportService({ withCatalog });
+const dirtyOverlayService = createDirtyOverlayService({
+  withCatalog,
+  contextOptions,
+  dataDir,
 });
 
 async function respond(line: string): Promise<Response> {
@@ -348,6 +360,120 @@ async function respond(line: string): Promise<Response> {
     }
     if (request.operation === "compiler.auditReview") {
       const data = auditQueryService.reviewAudit(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "memory.claimRecord") {
+      const data = bitemporalService.claimRecord(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "memory.claimCorrect") {
+      const data = bitemporalService.claimCorrect(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "memory.relationRecord") {
+      const data = bitemporalService.relationRecord(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "memory.timeline") {
+      const data = bitemporalService.timeline(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "memory.pinCreate") {
+      const data = pinPurgeService.pinCreate(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "memory.pinList") {
+      const data = pinPurgeService.pinList({
+        projectId: request.projectId,
+        bindingId: request.bindingId,
+        worktreeId: request.worktreeId,
+      });
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "memory.pinVerify") {
+      const data = pinPurgeService.pinVerify(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "memory.pinRelease") {
+      const data = pinPurgeService.pinRelease(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "memory.gcRun") {
+      const data = pinPurgeService.gcRun(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "memory.purgeStart") {
+      const data = pinPurgeService.purgeStart(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "memory.purgeResume") {
+      const data = pinPurgeService.purgeResume(
+        {
+          projectId: request.projectId,
+          bindingId: request.bindingId,
+          worktreeId: request.worktreeId,
+        },
+        request.purgeId,
+      );
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "memory.purgeStatus") {
+      const data = pinPurgeService.purgeStatus(
+        {
+          projectId: request.projectId,
+          bindingId: request.bindingId,
+          worktreeId: request.worktreeId,
+        },
+        request.purgeId,
+      );
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "memory.inboxSubmit") {
+      const data = inboxExportService.inboxSubmit(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "memory.inboxList") {
+      const data = inboxExportService.inboxList({
+        projectId: request.projectId,
+        bindingId: request.bindingId,
+        worktreeId: request.worktreeId,
+      });
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "memory.inboxReview") {
+      const data = inboxExportService.inboxReview(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "memory.exportPreview") {
+      const data = inboxExportService.exportPreview(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "memory.exportExceptionGrant") {
+      const data = inboxExportService.exportExceptionGrant(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "memory.exportExecute") {
+      const data = inboxExportService.exportExecute(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "memory.overlayCapture") {
+      const data = await dirtyOverlayService.capture(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "memory.overlayList") {
+      const data = dirtyOverlayService.list({
+        projectId: request.projectId,
+        bindingId: request.bindingId,
+        worktreeId: request.worktreeId,
+      });
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "memory.overlayVerify") {
+      const data = dirtyOverlayService.verify(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "memory.overlayReconstruct") {
+      const data = dirtyOverlayService.reconstruct(request);
       return { ...envelope, operation: request.operation, ok: true, data };
     }
     const project = withCatalog((store) => store.lookup(request.projectId));

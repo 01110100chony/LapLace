@@ -34,6 +34,8 @@ import { createIdentityStore, identityMigration } from "./identity-store.ts";
 import { createEvidenceAdapter } from "./evidence-adapter.ts";
 import { createDecisionStore, decisionMigration } from "./decision-store.ts";
 import { createF2Store, f2Migration } from "./f2-store.ts";
+import { createCasStore } from "./cas-store.ts";
+import { createF3Store, f3Migration } from "./f3-store.ts";
 
 const migrations = [
   `CREATE TABLE projects (
@@ -66,6 +68,7 @@ const migrations = [
   identityMigration,
   decisionMigration,
   f2Migration,
+  f3Migration,
 ];
 
 export const catalogSchemaVersion = migrations.length;
@@ -269,6 +272,9 @@ export function openCatalog(dataDir: string) {
       evidence,
     );
     decisions.reconcileTombstones();
+    const cas = createCasStore(dataDir);
+    const f3 = createF3Store(database, dataDir, write, read, identity, cas);
+    f3.reconcileTombstones();
     const f2 = createF2Store(database, write, read, identity);
     const codexHistory = createCodexHistory(database, context);
     return {
@@ -277,6 +283,8 @@ export function openCatalog(dataDir: string) {
       contextSearch,
       evidence,
       decisions,
+      cas,
+      f3,
       f2,
       codexHistory,
       tasks: createTaskStore(database, write, codexHistory),
