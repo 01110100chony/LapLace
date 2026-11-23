@@ -74,6 +74,17 @@ pub enum ErrorCode {
     GrantExpired,
     HandoffInvalid,
     AuditUnavailable,
+    MemoryInvalidInput,
+    MemoryNotFound,
+    MemoryConflict,
+    PinQuotaExceeded,
+    PinProtected,
+    PurgeInProgress,
+    ExportDenied,
+    ExportExceptionInvalid,
+    OverlayRaceDetected,
+    OverlayBlobMissing,
+    OverlayUnsafeTarget,
     CloneUnavailable,
     CloneBusy,
     CloneDestinationExists,
@@ -345,6 +356,50 @@ enum Payload {
     CompilerAuditList(ScopePayload),
     #[serde(rename = "compiler.auditReview")]
     CompilerAuditReview(ScopePayload),
+    #[serde(rename = "memory.claimRecord")]
+    MemoryClaimRecord(ScopePayload),
+    #[serde(rename = "memory.claimCorrect")]
+    MemoryClaimCorrect(ScopePayload),
+    #[serde(rename = "memory.relationRecord")]
+    MemoryRelationRecord(ScopePayload),
+    #[serde(rename = "memory.timeline")]
+    MemoryTimeline(ScopePayload),
+    #[serde(rename = "memory.pinCreate")]
+    MemoryPinCreate(ScopePayload),
+    #[serde(rename = "memory.pinList")]
+    MemoryPinList(ScopePayload),
+    #[serde(rename = "memory.pinVerify")]
+    MemoryPinVerify(ScopePayload),
+    #[serde(rename = "memory.pinRelease")]
+    MemoryPinRelease(ScopePayload),
+    #[serde(rename = "memory.gcRun")]
+    MemoryGcRun(ScopePayload),
+    #[serde(rename = "memory.purgeStart")]
+    MemoryPurgeStart(ScopePayload),
+    #[serde(rename = "memory.purgeResume")]
+    MemoryPurgeResume(ScopePayload),
+    #[serde(rename = "memory.purgeStatus")]
+    MemoryPurgeStatus(ScopePayload),
+    #[serde(rename = "memory.inboxSubmit")]
+    MemoryInboxSubmit(ScopePayload),
+    #[serde(rename = "memory.inboxList")]
+    MemoryInboxList(ScopePayload),
+    #[serde(rename = "memory.inboxReview")]
+    MemoryInboxReview(ScopePayload),
+    #[serde(rename = "memory.exportPreview")]
+    MemoryExportPreview(ScopePayload),
+    #[serde(rename = "memory.exportExceptionGrant")]
+    MemoryExportExceptionGrant(ScopePayload),
+    #[serde(rename = "memory.exportExecute")]
+    MemoryExportExecute(ScopePayload),
+    #[serde(rename = "memory.overlayCapture")]
+    MemoryOverlayCapture(ScopePayload),
+    #[serde(rename = "memory.overlayList")]
+    MemoryOverlayList(ScopePayload),
+    #[serde(rename = "memory.overlayVerify")]
+    MemoryOverlayVerify(ScopePayload),
+    #[serde(rename = "memory.overlayReconstruct")]
+    MemoryOverlayReconstruct(ScopePayload),
 }
 
 impl Payload {
@@ -410,6 +465,28 @@ impl Payload {
             Self::CompilerQueryRun(_) => "compiler.queryRun",
             Self::CompilerAuditList(_) => "compiler.auditList",
             Self::CompilerAuditReview(_) => "compiler.auditReview",
+            Self::MemoryClaimRecord(_) => "memory.claimRecord",
+            Self::MemoryClaimCorrect(_) => "memory.claimCorrect",
+            Self::MemoryRelationRecord(_) => "memory.relationRecord",
+            Self::MemoryTimeline(_) => "memory.timeline",
+            Self::MemoryPinCreate(_) => "memory.pinCreate",
+            Self::MemoryPinList(_) => "memory.pinList",
+            Self::MemoryPinVerify(_) => "memory.pinVerify",
+            Self::MemoryPinRelease(_) => "memory.pinRelease",
+            Self::MemoryGcRun(_) => "memory.gcRun",
+            Self::MemoryPurgeStart(_) => "memory.purgeStart",
+            Self::MemoryPurgeResume(_) => "memory.purgeResume",
+            Self::MemoryPurgeStatus(_) => "memory.purgeStatus",
+            Self::MemoryInboxSubmit(_) => "memory.inboxSubmit",
+            Self::MemoryInboxList(_) => "memory.inboxList",
+            Self::MemoryInboxReview(_) => "memory.inboxReview",
+            Self::MemoryExportPreview(_) => "memory.exportPreview",
+            Self::MemoryExportExceptionGrant(_) => "memory.exportExceptionGrant",
+            Self::MemoryExportExecute(_) => "memory.exportExecute",
+            Self::MemoryOverlayCapture(_) => "memory.overlayCapture",
+            Self::MemoryOverlayList(_) => "memory.overlayList",
+            Self::MemoryOverlayVerify(_) => "memory.overlayVerify",
+            Self::MemoryOverlayReconstruct(_) => "memory.overlayReconstruct",
         }
     }
 
@@ -476,7 +553,29 @@ impl Payload {
             | Self::CompilerMcpCall(data)
             | Self::CompilerQueryRun(data)
             | Self::CompilerAuditList(data)
-            | Self::CompilerAuditReview(data) => data.scope.valid(),
+            | Self::CompilerAuditReview(data)
+            | Self::MemoryClaimRecord(data)
+            | Self::MemoryClaimCorrect(data)
+            | Self::MemoryRelationRecord(data)
+            | Self::MemoryTimeline(data)
+            | Self::MemoryPinCreate(data)
+            | Self::MemoryPinList(data)
+            | Self::MemoryPinVerify(data)
+            | Self::MemoryPinRelease(data)
+            | Self::MemoryGcRun(data)
+            | Self::MemoryPurgeStart(data)
+            | Self::MemoryPurgeResume(data)
+            | Self::MemoryPurgeStatus(data)
+            | Self::MemoryInboxSubmit(data)
+            | Self::MemoryInboxList(data)
+            | Self::MemoryInboxReview(data)
+            | Self::MemoryExportPreview(data)
+            | Self::MemoryExportExceptionGrant(data)
+            | Self::MemoryExportExecute(data)
+            | Self::MemoryOverlayCapture(data)
+            | Self::MemoryOverlayList(data)
+            | Self::MemoryOverlayVerify(data)
+            | Self::MemoryOverlayReconstruct(data) => data.scope.valid(),
             Self::ContextSearch(data) => {
                 valid_project_id(&data.project_id)
                     && data.context_id.as_deref().is_none_or(valid_project_id)
@@ -572,7 +671,29 @@ impl Response {
                                 | Payload::CompilerMcpCall(data)
                                 | Payload::CompilerQueryRun(data)
                                 | Payload::CompilerAuditList(data)
-                                | Payload::CompilerAuditReview(data),
+                                | Payload::CompilerAuditReview(data)
+                                | Payload::MemoryClaimRecord(data)
+                                | Payload::MemoryClaimCorrect(data)
+                                | Payload::MemoryRelationRecord(data)
+                                | Payload::MemoryTimeline(data)
+                                | Payload::MemoryPinCreate(data)
+                                | Payload::MemoryPinList(data)
+                                | Payload::MemoryPinVerify(data)
+                                | Payload::MemoryPinRelease(data)
+                                | Payload::MemoryGcRun(data)
+                                | Payload::MemoryPurgeStart(data)
+                                | Payload::MemoryPurgeResume(data)
+                                | Payload::MemoryPurgeStatus(data)
+                                | Payload::MemoryInboxSubmit(data)
+                                | Payload::MemoryInboxList(data)
+                                | Payload::MemoryInboxReview(data)
+                                | Payload::MemoryExportPreview(data)
+                                | Payload::MemoryExportExceptionGrant(data)
+                                | Payload::MemoryExportExecute(data)
+                                | Payload::MemoryOverlayCapture(data)
+                                | Payload::MemoryOverlayList(data)
+                                | Payload::MemoryOverlayVerify(data)
+                                | Payload::MemoryOverlayReconstruct(data),
                             ) => {
                                 data.scope.project_id == pid
                                     && data.scope.binding_id == bid
@@ -749,6 +870,8 @@ pub enum Operation<'a> {
     Resume(&'a ResumeRequest),
     #[serde(untagged)]
     Compiler(&'a CompilerRequest),
+    #[serde(untagged)]
+    Memory(&'a MemoryRequest),
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1447,6 +1570,448 @@ impl CompilerRequest {
     }
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(
+    tag = "operation",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum MemoryRequest {
+    #[serde(rename = "memory.claimRecord")]
+    ClaimRecord {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        request_id: String,
+        title: String,
+        content: String,
+        author: String,
+        reason: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        promote_canonical: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        visibility: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        conflict_key: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        conflict_polarity: Option<String>,
+        valid_from: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        valid_to: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        known_at: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        evidence_ref: Option<serde_json::Value>,
+    },
+    #[serde(rename = "memory.claimCorrect")]
+    ClaimCorrect {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        request_id: String,
+        claim_id: String,
+        content: String,
+        author: String,
+        reason: String,
+        correct_from: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        correct_to: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        known_at: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        conflict_key: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        conflict_polarity: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        evidence_ref: Option<serde_json::Value>,
+    },
+    #[serde(rename = "memory.relationRecord")]
+    RelationRecord {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        from_id: String,
+        to_id: String,
+        kind: String,
+        signal_kind: String,
+        rationale: String,
+        author: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        known_at: Option<String>,
+    },
+    #[serde(rename = "memory.timeline")]
+    Timeline {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        known_at: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        valid_at: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        signal_kinds: Option<Vec<String>>,
+    },
+    #[serde(rename = "memory.pinCreate")]
+    PinCreate {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        label: String,
+        source: serde_json::Value,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        quota_bytes: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        protected_claim_id: Option<String>,
+    },
+    #[serde(rename = "memory.pinList")]
+    PinList {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+    },
+    #[serde(rename = "memory.pinVerify")]
+    PinVerify {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        pin_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        unpinned_ref: Option<serde_json::Value>,
+    },
+    #[serde(rename = "memory.pinRelease")]
+    PinRelease {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        pin_id: String,
+        human_confirmed: bool,
+    },
+    #[serde(rename = "memory.gcRun")]
+    GcRun {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        quota_bytes: Option<u64>,
+        human_confirmed: bool,
+    },
+    #[serde(rename = "memory.purgeStart")]
+    PurgeStart {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        target_kind: String,
+        target_id: String,
+        reason: String,
+        human_confirmed: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        max_steps: Option<u32>,
+    },
+    #[serde(rename = "memory.purgeResume")]
+    PurgeResume {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        purge_id: String,
+    },
+    #[serde(rename = "memory.purgeStatus")]
+    PurgeStatus {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        purge_id: String,
+    },
+    #[serde(rename = "memory.inboxSubmit")]
+    InboxSubmit {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        title: String,
+        content: String,
+        target_kind: String,
+        origin_label: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        visibility: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        ttl_ms: Option<u64>,
+    },
+    #[serde(rename = "memory.inboxList")]
+    InboxList {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+    },
+    #[serde(rename = "memory.inboxReview")]
+    InboxReview {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        proposal_id: String,
+        decision: String,
+        reviewer: String,
+        note: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        promote_canonical: Option<bool>,
+        human_confirmed: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        valid_from: Option<String>,
+    },
+    #[serde(rename = "memory.exportPreview")]
+    ExportPreview {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        destination_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        policy_version: Option<String>,
+        items: serde_json::Value,
+    },
+    #[serde(rename = "memory.exportExceptionGrant")]
+    ExportExceptionGrant {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        bundle_digest: String,
+        destination_id: String,
+        policy_version: String,
+        reviewer: String,
+        reason: String,
+        human_confirmed: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        has_db_only_items: Option<bool>,
+    },
+    #[serde(rename = "memory.exportExecute")]
+    ExportExecute {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        destination_id: String,
+        policy_version: String,
+        items: serde_json::Value,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        exception_id: Option<String>,
+    },
+    #[serde(rename = "memory.overlayCapture")]
+    OverlayCapture {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        label: String,
+    },
+    #[serde(rename = "memory.overlayList")]
+    OverlayList {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+    },
+    #[serde(rename = "memory.overlayVerify")]
+    OverlayVerify {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        overlay_id: String,
+    },
+    #[serde(rename = "memory.overlayReconstruct")]
+    OverlayReconstruct {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        overlay_id: String,
+        target_dir: String,
+        disposable_target_confirmed: bool,
+    },
+}
+
+impl MemoryRequest {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::ClaimRecord { .. } => "memory.claimRecord",
+            Self::ClaimCorrect { .. } => "memory.claimCorrect",
+            Self::RelationRecord { .. } => "memory.relationRecord",
+            Self::Timeline { .. } => "memory.timeline",
+            Self::PinCreate { .. } => "memory.pinCreate",
+            Self::PinList { .. } => "memory.pinList",
+            Self::PinVerify { .. } => "memory.pinVerify",
+            Self::PinRelease { .. } => "memory.pinRelease",
+            Self::GcRun { .. } => "memory.gcRun",
+            Self::PurgeStart { .. } => "memory.purgeStart",
+            Self::PurgeResume { .. } => "memory.purgeResume",
+            Self::PurgeStatus { .. } => "memory.purgeStatus",
+            Self::InboxSubmit { .. } => "memory.inboxSubmit",
+            Self::InboxList { .. } => "memory.inboxList",
+            Self::InboxReview { .. } => "memory.inboxReview",
+            Self::ExportPreview { .. } => "memory.exportPreview",
+            Self::ExportExceptionGrant { .. } => "memory.exportExceptionGrant",
+            Self::ExportExecute { .. } => "memory.exportExecute",
+            Self::OverlayCapture { .. } => "memory.overlayCapture",
+            Self::OverlayList { .. } => "memory.overlayList",
+            Self::OverlayVerify { .. } => "memory.overlayVerify",
+            Self::OverlayReconstruct { .. } => "memory.overlayReconstruct",
+        }
+    }
+
+    fn project_id(&self) -> &str {
+        match self {
+            Self::ClaimRecord { project_id, .. }
+            | Self::ClaimCorrect { project_id, .. }
+            | Self::RelationRecord { project_id, .. }
+            | Self::Timeline { project_id, .. }
+            | Self::PinCreate { project_id, .. }
+            | Self::PinList { project_id, .. }
+            | Self::PinVerify { project_id, .. }
+            | Self::PinRelease { project_id, .. }
+            | Self::GcRun { project_id, .. }
+            | Self::PurgeStart { project_id, .. }
+            | Self::PurgeResume { project_id, .. }
+            | Self::PurgeStatus { project_id, .. }
+            | Self::InboxSubmit { project_id, .. }
+            | Self::InboxList { project_id, .. }
+            | Self::InboxReview { project_id, .. }
+            | Self::ExportPreview { project_id, .. }
+            | Self::ExportExceptionGrant { project_id, .. }
+            | Self::ExportExecute { project_id, .. }
+            | Self::OverlayCapture { project_id, .. }
+            | Self::OverlayList { project_id, .. }
+            | Self::OverlayVerify { project_id, .. }
+            | Self::OverlayReconstruct { project_id, .. } => project_id,
+        }
+    }
+
+    fn scope(&self) -> (&str, &str, &str) {
+        match self {
+            Self::ClaimRecord {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::ClaimCorrect {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::RelationRecord {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::Timeline {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::PinCreate {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::PinList {
+                project_id,
+                binding_id,
+                worktree_id,
+            }
+            | Self::PinVerify {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::PinRelease {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::GcRun {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::PurgeStart {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::PurgeResume {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::PurgeStatus {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::InboxSubmit {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::InboxList {
+                project_id,
+                binding_id,
+                worktree_id,
+            }
+            | Self::InboxReview {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::ExportPreview {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::ExportExceptionGrant {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::ExportExecute {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::OverlayCapture {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::OverlayList {
+                project_id,
+                binding_id,
+                worktree_id,
+            }
+            | Self::OverlayVerify {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::OverlayReconstruct {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            } => (project_id, binding_id, worktree_id),
+        }
+    }
+}
+
 impl ResumeRequest {
     fn name(&self) -> &'static str {
         match self {
@@ -1549,6 +2114,7 @@ impl<'a> Operation<'a> {
             Self::Working(request) => request.name(),
             Self::Resume(request) => request.name(),
             Self::Compiler(request) => request.name(),
+            Self::Memory(request) => request.name(),
         }
     }
 
@@ -1571,6 +2137,7 @@ impl<'a> Operation<'a> {
             Self::Working(request) => Some(request.project_id()),
             Self::Resume(request) => Some(request.project_id()),
             Self::Compiler(request) => Some(request.project_id()),
+            Self::Memory(request) => Some(request.project_id()),
             _ => None,
         }
     }
@@ -1579,6 +2146,7 @@ impl<'a> Operation<'a> {
         match self {
             Self::Resume(request) => request.scope(),
             Self::Compiler(request) => Some(request.scope()),
+            Self::Memory(request) => Some(request.scope()),
             _ => None,
         }
     }
@@ -2347,6 +2915,329 @@ mod resume_tests {
             assert!(
                 !bad_resp.matches("comp-1", op),
                 "{op_name} must reject swapped bindingId"
+            );
+        }
+    }
+
+    #[test]
+    fn all_memory_variants_round_trip_and_match_scope() {
+        let project_id = "1".repeat(64);
+        let binding_id = "2".repeat(64);
+        let worktree_id = "3".repeat(64);
+        let other_id = "9".repeat(64);
+
+        let scope_json = || {
+            serde_json::json!({
+                "projectId": project_id,
+                "bindingId": binding_id,
+                "worktreeId": worktree_id
+            })
+        };
+
+        let cases = [
+            (
+                "memory.claimRecord",
+                serde_json::json!({
+                    "operation": "memory.claimRecord",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "requestId": "req-1",
+                    "title": "Titulo",
+                    "content": "Conteudo",
+                    "author": "Autor",
+                    "reason": "Razao",
+                    "validFrom": "2026-01-01T00:00:00.000Z"
+                }),
+            ),
+            (
+                "memory.claimCorrect",
+                serde_json::json!({
+                    "operation": "memory.claimCorrect",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "requestId": "req-2",
+                    "claimId": "claim-1",
+                    "content": "Correcao",
+                    "author": "Autor",
+                    "reason": "Parcial",
+                    "correctFrom": "2026-01-10T00:00:00.000Z"
+                }),
+            ),
+            (
+                "memory.relationRecord",
+                serde_json::json!({
+                    "operation": "memory.relationRecord",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "fromId": "c1",
+                    "toId": "c2",
+                    "kind": "supports",
+                    "signalKind": "confirmed_link",
+                    "rationale": "Evidencia direta",
+                    "author": "Autor"
+                }),
+            ),
+            (
+                "memory.timeline",
+                serde_json::json!({
+                    "operation": "memory.timeline",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "knownAt": "2026-02-01T00:00:00.000Z"
+                }),
+            ),
+            (
+                "memory.pinCreate",
+                serde_json::json!({
+                    "operation": "memory.pinCreate",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "label": "Pin 1",
+                    "source": { "kind": "inline", "content": "prova" }
+                }),
+            ),
+            (
+                "memory.pinList",
+                serde_json::json!({
+                    "operation": "memory.pinList",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id
+                }),
+            ),
+            (
+                "memory.pinVerify",
+                serde_json::json!({
+                    "operation": "memory.pinVerify",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "pinId": "pin-1"
+                }),
+            ),
+            (
+                "memory.pinRelease",
+                serde_json::json!({
+                    "operation": "memory.pinRelease",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "pinId": "pin-1",
+                    "humanConfirmed": true
+                }),
+            ),
+            (
+                "memory.gcRun",
+                serde_json::json!({
+                    "operation": "memory.gcRun",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "humanConfirmed": true
+                }),
+            ),
+            (
+                "memory.purgeStart",
+                serde_json::json!({
+                    "operation": "memory.purgeStart",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "targetKind": "pin",
+                    "targetId": "pin-1",
+                    "reason": "Limpeza",
+                    "humanConfirmed": true
+                }),
+            ),
+            (
+                "memory.purgeResume",
+                serde_json::json!({
+                    "operation": "memory.purgeResume",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "purgeId": "purge-1"
+                }),
+            ),
+            (
+                "memory.purgeStatus",
+                serde_json::json!({
+                    "operation": "memory.purgeStatus",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "purgeId": "purge-1"
+                }),
+            ),
+            (
+                "memory.inboxSubmit",
+                serde_json::json!({
+                    "operation": "memory.inboxSubmit",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "title": "Sugestao",
+                    "content": "Conteudo candidato",
+                    "targetKind": "claim",
+                    "originLabel": "sessao-1"
+                }),
+            ),
+            (
+                "memory.inboxList",
+                serde_json::json!({
+                    "operation": "memory.inboxList",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id
+                }),
+            ),
+            (
+                "memory.inboxReview",
+                serde_json::json!({
+                    "operation": "memory.inboxReview",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "proposalId": "prop-1",
+                    "decision": "approve",
+                    "reviewer": "Operador",
+                    "note": "Aprovado",
+                    "humanConfirmed": true
+                }),
+            ),
+            (
+                "memory.exportPreview",
+                serde_json::json!({
+                    "operation": "memory.exportPreview",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "destinationId": "codex_mock",
+                    "items": [{
+                        "itemId": "i-1",
+                        "title": "Item",
+                        "visibility": "local_only",
+                        "content": "texto seguro"
+                    }]
+                }),
+            ),
+            (
+                "memory.exportExceptionGrant",
+                serde_json::json!({
+                    "operation": "memory.exportExceptionGrant",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "bundleDigest": "a".repeat(64),
+                    "destinationId": "codex_mock",
+                    "policyVersion": "f2-policy-v1",
+                    "reviewer": "Operador",
+                    "reason": "Excecao",
+                    "humanConfirmed": true
+                }),
+            ),
+            (
+                "memory.exportExecute",
+                serde_json::json!({
+                    "operation": "memory.exportExecute",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "destinationId": "codex_mock",
+                    "policyVersion": "f2-policy-v1",
+                    "items": [{
+                        "itemId": "i-1",
+                        "title": "Item",
+                        "visibility": "canonical_verified",
+                        "content": "texto"
+                    }]
+                }),
+            ),
+            (
+                "memory.overlayCapture",
+                serde_json::json!({
+                    "operation": "memory.overlayCapture",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "label": "WIP"
+                }),
+            ),
+            (
+                "memory.overlayList",
+                serde_json::json!({
+                    "operation": "memory.overlayList",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id
+                }),
+            ),
+            (
+                "memory.overlayVerify",
+                serde_json::json!({
+                    "operation": "memory.overlayVerify",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "overlayId": "ov-1"
+                }),
+            ),
+            (
+                "memory.overlayReconstruct",
+                serde_json::json!({
+                    "operation": "memory.overlayReconstruct",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "overlayId": "ov-1",
+                    "targetDir": "C:\\Temp\\disposable-overlay",
+                    "disposableTargetConfirmed": true
+                }),
+            ),
+        ];
+
+        for (op_name, req_json) in cases {
+            let req: MemoryRequest = serde_json::from_value(req_json.clone()).unwrap();
+            let op = Operation::Memory(&req);
+            assert_eq!(op.name(), op_name);
+            assert_eq!(serde_json::to_value(op).unwrap(), req_json);
+
+            let mut extra = req_json;
+            extra["unexpectedField"] = true.into();
+            assert!(serde_json::from_value::<MemoryRequest>(extra).is_err());
+
+            let ok_resp: Response = serde_json::from_value(serde_json::json!({
+                "version": VERSION,
+                "id": "mem-1",
+                "ok": true,
+                "operation": op_name,
+                "data": { "scope": scope_json() }
+            }))
+            .unwrap();
+            assert!(ok_resp.matches("mem-1", op), "{op_name} should match scope");
+
+            let bad_resp: Response = serde_json::from_value(serde_json::json!({
+                "version": VERSION,
+                "id": "mem-1",
+                "ok": true,
+                "operation": op_name,
+                "data": {
+                    "scope": {
+                        "projectId": project_id,
+                        "bindingId": binding_id,
+                        "worktreeId": other_id
+                    }
+                }
+            }))
+            .unwrap();
+            assert!(
+                !bad_resp.matches("mem-1", op),
+                "{op_name} must reject swapped worktreeId"
             );
         }
     }

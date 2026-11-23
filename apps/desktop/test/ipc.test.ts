@@ -642,3 +642,70 @@ test("F2-T04 / F2-T10: desktop.compiler valida operações compiler.* e rejeita 
     { code: "invalid_response" },
   );
 });
+
+test("encapsula operações F3 (memory.*) em memory_request e valida escopo e erros PT-BR", async () => {
+  const { errorMessage, DesktopError } = await import("../src/ipc.ts");
+  const scope = {
+    projectId: "1".repeat(64),
+    bindingId: "2".repeat(64),
+    worktreeId: "3".repeat(64),
+  };
+  let corruptScope = false;
+
+  const client = createDesktopClient(async (command, args) => {
+    assert.equal(command, "memory_request");
+    const req = args.request as Record<string, unknown>;
+    const op = req.operation as string;
+    const respScope = corruptScope
+      ? { ...scope, worktreeId: "9".repeat(64) }
+      : scope;
+
+    if (op === "memory.pinList") {
+      return {
+        version: protocolVersion,
+        id: args.id,
+        ok: true,
+        operation: op,
+        data: { scope: respScope, quotaBytes: 65536, usedBytes: 0, items: [] },
+      };
+    }
+    if (op === "memory.overlayVerify") {
+      return {
+        version: protocolVersion,
+        id: args.id,
+        ok: true,
+        operation: op,
+        data: {
+          scope: respScope,
+          overlayId: "ov-1",
+          intact: true,
+          manifestDigest: "a".repeat(64),
+          checkedBlobs: 1,
+          missingBlobs: [],
+          mismatchedPaths: [],
+        },
+      };
+    }
+    assert.fail(`unexpected op: ${op}`);
+  });
+
+  const list = await client.memory.pinList(scope);
+  assert.equal(list.quotaBytes, 65536);
+
+  const verified = await client.memory.overlayVerify({
+    ...scope,
+    overlayId: "ov-1",
+  });
+  assert.equal(verified.intact, true);
+
+  corruptScope = true;
+  await assert.rejects(client.memory.pinList(scope), {
+    code: "invalid_response",
+  });
+
+  assert.match(errorMessage(new DesktopError("overlay_race_detected")), /OCC/);
+  assert.match(
+    errorMessage(new DesktopError("pin_protected")),
+    /última prova ativa/,
+  );
+});

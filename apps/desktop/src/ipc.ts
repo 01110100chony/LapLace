@@ -5,6 +5,8 @@ import {
   contextSearchPageSize,
   type AuditedQueryRunInput,
   type AuditReviewInput,
+  type ClaimCorrectInput,
+  type ClaimRecordInput,
   type CodexExecution,
   type CodexPrepare,
   type CodexPreview,
@@ -15,13 +17,27 @@ import {
   type DecisionPurgeInput,
   type DecisionRecordInput,
   type ErrorCode,
+  type ExportExceptionGrantInput,
+  type ExportExecuteInput,
+  type ExportPreviewInput,
+  type GcRunInput,
   type GrantIssueInput,
   type GrantRevokeInput,
   type HandoffImportInput,
   type IdentityScope,
+  type InboxReviewInput,
+  type InboxSubmitInput,
   type McpCallInput,
   type Operation,
+  type OverlayCaptureInput,
+  type OverlayReconstructInput,
+  type OverlayRefInput,
   type PackageExportInput,
+  type PinCreateInput,
+  type PinReleaseInput,
+  type PinVerifyInput,
+  type PurgeStartInput,
+  type RelationRecordInput,
   type ReviewInput,
   type Results,
   type TaskDraft,
@@ -29,6 +45,7 @@ import {
   type TaskRunRef,
   type TaskScope,
   type TaskStart,
+  type TimelineInput,
   type WorkingLayer,
   type WorkingRef,
 } from "@laplace/contracts";
@@ -56,7 +73,8 @@ type DesktopCommand =
   | "task_request"
   | "working_request"
   | "resume_request"
-  | "compiler_request";
+  | "compiler_request"
+  | "memory_request";
 type PickerOperation =
   "workspace.addLocal" | "project.relocate" | "clone.start";
 type DesktopOperation = Exclude<Operation, "codex.approval" | "clone.prepare">;
@@ -91,6 +109,28 @@ const commands: Record<DesktopOperation, DesktopCommand> = {
   "compiler.queryRun": "compiler_request",
   "compiler.auditList": "compiler_request",
   "compiler.auditReview": "compiler_request",
+  "memory.claimRecord": "memory_request",
+  "memory.claimCorrect": "memory_request",
+  "memory.relationRecord": "memory_request",
+  "memory.timeline": "memory_request",
+  "memory.pinCreate": "memory_request",
+  "memory.pinList": "memory_request",
+  "memory.pinVerify": "memory_request",
+  "memory.pinRelease": "memory_request",
+  "memory.gcRun": "memory_request",
+  "memory.purgeStart": "memory_request",
+  "memory.purgeResume": "memory_request",
+  "memory.purgeStatus": "memory_request",
+  "memory.inboxSubmit": "memory_request",
+  "memory.inboxList": "memory_request",
+  "memory.inboxReview": "memory_request",
+  "memory.exportPreview": "memory_request",
+  "memory.exportExceptionGrant": "memory_request",
+  "memory.exportExecute": "memory_request",
+  "memory.overlayCapture": "memory_request",
+  "memory.overlayList": "memory_request",
+  "memory.overlayVerify": "memory_request",
+  "memory.overlayReconstruct": "memory_request",
   "context.browse": "context_browse",
   "context.capture": "context_capture",
   "context.list": "context_list",
@@ -160,7 +200,8 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
           command === "task_request" ||
           command === "working_request" ||
           command === "resume_request" ||
-          command === "compiler_request"
+          command === "compiler_request" ||
+          command === "memory_request"
           ? { id, request: { operation, ...args } }
           : { ...args, id },
       );
@@ -221,8 +262,11 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
             .historical.evidence;
           if (ev.ref !== null && ev.ref.contextId !== args.contextId)
             throw new DesktopError("invalid_response");
-        } else if (operation === "compiler.compile") {
-          // Scope validation above already verifies IdentityScope on F2 compile responses.
+        } else if (
+          operation === "compiler.compile" ||
+          operation.startsWith("memory.")
+        ) {
+          // Scope validation above already verifies IdentityScope on F2/F3 responses.
         } else if (
           !("contextId" in response.data) ||
           response.data.contextId !== args.contextId
@@ -356,6 +400,46 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
         ),
       auditReview: (input: AuditReviewInput) =>
         request("compiler.auditReview", input),
+    },
+    memory: {
+      claimRecord: (input: ClaimRecordInput) =>
+        request("memory.claimRecord", input),
+      claimCorrect: (input: ClaimCorrectInput) =>
+        request("memory.claimCorrect", input),
+      relationRecord: (input: RelationRecordInput) =>
+        request("memory.relationRecord", input),
+      timeline: (input: TimelineInput) => request("memory.timeline", input),
+      pinCreate: (input: PinCreateInput) => request("memory.pinCreate", input),
+      pinList: (scope: IdentityScope) => request("memory.pinList", scope),
+      pinVerify: (input: PinVerifyInput) => request("memory.pinVerify", input),
+      pinRelease: (input: PinReleaseInput) =>
+        request("memory.pinRelease", input),
+      gcRun: (input: GcRunInput) => request("memory.gcRun", input),
+      purgeStart: (input: PurgeStartInput) =>
+        request("memory.purgeStart", input),
+      purgeResume: (scope: IdentityScope, purgeId: string) =>
+        request("memory.purgeResume", { ...scope, purgeId }),
+      purgeStatus: (scope: IdentityScope, purgeId: string) =>
+        request("memory.purgeStatus", { ...scope, purgeId }),
+      inboxSubmit: (input: InboxSubmitInput) =>
+        request("memory.inboxSubmit", input),
+      inboxList: (scope: IdentityScope) => request("memory.inboxList", scope),
+      inboxReview: (input: InboxReviewInput) =>
+        request("memory.inboxReview", input),
+      exportPreview: (input: ExportPreviewInput) =>
+        request("memory.exportPreview", input),
+      exportExceptionGrant: (input: ExportExceptionGrantInput) =>
+        request("memory.exportExceptionGrant", input),
+      exportExecute: (input: ExportExecuteInput) =>
+        request("memory.exportExecute", input),
+      overlayCapture: (input: OverlayCaptureInput) =>
+        request("memory.overlayCapture", input),
+      overlayList: (scope: IdentityScope) =>
+        request("memory.overlayList", scope),
+      overlayVerify: (input: OverlayRefInput) =>
+        request("memory.overlayVerify", input),
+      overlayReconstruct: (input: OverlayReconstructInput) =>
+        request("memory.overlayReconstruct", input),
     },
     working: {
       list: (projectId: string) => request("working.list", { projectId }),
@@ -761,6 +845,28 @@ const messages: Record<ErrorCode, string> = {
     "O ContextPackage ou handoff falhou na validação de integridade ou escopo.",
   audit_unavailable:
     "O registro de auditoria solicitado não está disponível neste escopo.",
+  memory_invalid_input:
+    "Os parâmetros da operação de memória F3 são inválidos ou exigem confirmação humana explícita.",
+  memory_not_found:
+    "O registro de memória, pin, proposta ou overlay solicitado não foi encontrado neste escopo.",
+  memory_conflict:
+    "Conflito bitemporal ou transição de estado inválida na caixa de memória.",
+  pin_quota_exceeded:
+    "A cota máxima do armazenamento CAS foi excedida; nenhum manifesto parcial foi publicado.",
+  pin_protected:
+    "Este pin protege a última prova ativa vinculada e não pode ser liberado nem coletado.",
+  purge_in_progress:
+    "Existe um expurgo em etapas pendente que precisa ser retomado.",
+  export_denied:
+    "Exportação bloqueada pela política de restrição mais forte (item db_only, destino não autorizado ou segredo detectado).",
+  export_exception_invalid:
+    "A exceção de exportação é inexistente ou não corresponde ao digest e destino exatos do lote.",
+  overlay_race_detected:
+    "O worktree ou índice Git mudou durante a captura do Dirty Overlay (aborto OCC).",
+  overlay_blob_missing:
+    "Um blob obrigatório do CAS para reconstruir o Dirty Overlay está ausente ou corrompido.",
+  overlay_unsafe_target:
+    "O destino de reconstrução exige confirmação explícita e deve ficar fora de projetos e do catálogo.",
   context_source_unavailable:
     "A fonte preservada está indisponível ou não passou na verificação de integridade.",
 };

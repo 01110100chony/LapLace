@@ -19,6 +19,7 @@ import type { PreviewId, ProjectSection } from "./navigation";
 import { EmptyState } from "./WorkView";
 import type { Theme } from "./appearance";
 import { WorkingTreeView } from "./WorkingTreeView";
+import { MemoryWorkspaceView } from "./MemoryWorkspaceView";
 import type { createDesktopClient } from "./ipc";
 
 export type ServiceStatus =
@@ -382,6 +383,7 @@ export function ProjectView({
   executionClient,
   workingClient,
   decisionClient,
+  memoryClient,
   onResumeUpdated,
   section,
   taskProposal,
@@ -407,6 +409,7 @@ export function ProjectView({
   executionClient: ReturnType<typeof createDesktopClient>["execution"];
   workingClient: ReturnType<typeof createDesktopClient>["working"];
   decisionClient: ReturnType<typeof createDesktopClient>["decisions"];
+  memoryClient: ReturnType<typeof createDesktopClient>["memory"];
   onResumeUpdated: () => void;
   section: ProjectSection;
   taskProposal?: TaskProposal;
@@ -503,6 +506,14 @@ export function ProjectView({
           cockpitObservation={resume ? resume.observation.observation : summary}
           client={workingClient}
         />
+      ) : section === "memory" ? (
+        <MemoryWorkspaceView
+          key={`${project.id}/${project.root}`}
+          projectId={project.id}
+          projectName={project.name}
+          scope={resume?.scope ?? identity?.scope ?? null}
+          client={memoryClient}
+        />
       ) : section === "context" ? (
         <ContextView
           key={`${project.id}/${project.root}`}
@@ -513,7 +524,7 @@ export function ProjectView({
           codex={codexClient}
           compiler={compilerClient}
           onCreateTask={onTaskProposal}
-          openMemory={() => openLab("memory")}
+          openMemory={() => onSection("memory")}
         />
       ) : (
         <>

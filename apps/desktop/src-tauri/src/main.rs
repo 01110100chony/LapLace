@@ -3,7 +3,7 @@
 mod ipc;
 
 use ipc::{
-    CodexMode, CodexRequest, CompilerRequest, ErrorCode, Fault, Operation, Response,
+    CodexMode, CodexRequest, CompilerRequest, ErrorCode, Fault, MemoryRequest, Operation, Response,
     ResumeRequest, SearchScope, Sidecar, TaskRequest, WorkingRequest,
 };
 use tauri::{path::BaseDirectory, Manager, RunEvent, State, WebviewWindow};
@@ -428,6 +428,15 @@ async fn compiler_request(
 }
 
 #[tauri::command]
+async fn memory_request(
+    id: String,
+    request: MemoryRequest,
+    sidecar: State<'_, Sidecar>,
+) -> Result<Response, Fault> {
+    Ok(sidecar.request(id, Operation::Memory(&request)).await?)
+}
+
+#[tauri::command]
 async fn codex_request(
     id: String,
     mut request: CodexRequest,
@@ -548,7 +557,8 @@ fn main() {
             task_request,
             working_request,
             resume_request,
-            compiler_request
+            compiler_request,
+            memory_request
         ])
         .build(tauri::generate_context!())
         .expect("falha ao inicializar a janela do Laplace");

@@ -3,6 +3,7 @@ import type { IconName } from "./VisualIcon";
 export const projectDestinations = [
   { id: "overview", label: "Retomada", icon: "overview" },
   { id: "context", label: "Contexto", icon: "archive" },
+  { id: "memory", label: "Memória", icon: "archive" },
   { id: "tasks", label: "Tarefas", icon: "tasks" },
   { id: "working", label: "Alterações Git", icon: "git" },
 ] as const satisfies readonly { id: string; label: string; icon: IconName }[];
