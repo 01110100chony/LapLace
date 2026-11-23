@@ -49,7 +49,7 @@ test(
       oracle,
     } = built;
 
-    assert.equal(catalogSchemaVersion, 12);
+    assert.equal(catalogSchemaVersion, 13);
 
     // Preserve an untouched v10 backup before the candidate mutates copy.copyDataDir.
     const restoreBackup = await createConsistentCatalogCopy(
@@ -127,7 +127,7 @@ test(
       using database = new DatabaseSync(copy.copyDatabase, { readOnly: true });
       assert.equal(
         database.prepare("PRAGMA user_version").get()?.user_version,
-        12,
+        catalogSchemaVersion,
       );
       assert.equal(
         database.prepare("SELECT COUNT(*) AS c FROM logical_projects").get()?.c,
@@ -145,7 +145,7 @@ test(
     }
 
     const migratedOracle = readLegacyMigrationOracle(copy.copyDatabase, 1);
-    assert.equal(migratedOracle.schema.userVersion, 12);
+    assert.equal(migratedOracle.schema.userVersion, catalogSchemaVersion);
     assert.equal(migratedOracle.schema.integrityCheck, "ok");
     assert.equal(migratedOracle.schema.foreignKeyViolations, 0);
     assert.deepEqual(

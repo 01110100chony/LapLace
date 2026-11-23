@@ -241,6 +241,7 @@ export function ProjectView({
   confirmIdentity,
   contextClient,
   codexClient,
+  compilerClient,
   taskClient,
   executionClient,
   workingClient,
@@ -257,6 +258,7 @@ export function ProjectView({
   confirmIdentity: () => Promise<Project>;
   contextClient: ReturnType<typeof createDesktopClient>["context"];
   codexClient: ReturnType<typeof createDesktopClient>["codex"];
+  compilerClient: ReturnType<typeof createDesktopClient>["compiler"];
   taskClient: ReturnType<typeof createDesktopClient>["task"];
   executionClient: ReturnType<typeof createDesktopClient>["execution"];
   workingClient: ReturnType<typeof createDesktopClient>["working"];
@@ -354,8 +356,10 @@ export function ProjectView({
           key={`${project.id}/${project.root}`}
           projectId={project.id}
           projectName={project.name}
+          scope={resume?.scope ?? identity?.scope ?? null}
           client={contextClient}
           codex={codexClient}
+          compiler={compilerClient}
           onCreateTask={(source, question) => {
             setTaskProposal({ source, objective: question });
             setSection("tasks");

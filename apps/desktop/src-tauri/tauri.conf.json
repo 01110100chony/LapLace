@@ -33,6 +33,7 @@
     "externalBin": ["generated/laplace-node", "generated/laplace-git-job"],
     "resources": {
       "generated/service.cjs": "sidecar/service.cjs",
+      "generated/mcp-gateway.cjs": "sidecar/mcp-gateway.cjs",
       "generated/NODE-LICENSE.txt": "licenses/NODE-LICENSE.txt",
       "generated/THIRD-PARTY-NOTICES.txt": "licenses/THIRD-PARTY-NOTICES.txt"
     }

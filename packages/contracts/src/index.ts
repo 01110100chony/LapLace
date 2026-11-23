@@ -58,6 +58,14 @@ export const errorCodes = [
   "decision_authorization_required",
   "decision_purge_pending",
   "resume_stale",
+  "compiler_invalid_input",
+  "destination_unknown",
+  "destination_denied",
+  "grant_invalid",
+  "grant_revoked",
+  "grant_expired",
+  "handoff_invalid",
+  "audit_unavailable",
   "clone_unavailable",
   "clone_busy",
   ...cloneFailures,
@@ -104,6 +112,7 @@ export type Results = ContextResults &
   ReviewResults &
   ResumeResults &
   DecisionResults &
+  CompilerResults &
   CloneResults & {
     health: Health;
     "workspace.list": Catalog;
@@ -130,6 +139,7 @@ export type Request = Envelope &
     | ReviewRequests
     | ResumeRequests
     | DecisionRequests
+    | CompilerRequests
     | CloneRequests
   );
 export type Response<K extends Operation = Operation> =
@@ -181,6 +191,8 @@ export function parseRequest(value: unknown): Request | undefined {
   if (resume) return { ...envelope, ...resume };
   const decision = parseDecisionRequest(value);
   if (decision) return { ...envelope, ...decision };
+  const compiler = parseCompilerRequest(value);
+  if (compiler) return { ...envelope, ...compiler };
   if (value.operation === "health") return { ...envelope, operation: "health" };
   if (value.operation === "workspace.list")
     return { ...envelope, operation: "workspace.list" };
@@ -325,6 +337,19 @@ export function isResponse<K extends Operation>(
   )
     return isDecisionResult(operation, value.data);
   if (
+    operation === "compiler.compile" ||
+    operation === "compiler.grantIssue" ||
+    operation === "compiler.grantList" ||
+    operation === "compiler.grantRevoke" ||
+    operation === "compiler.packageExport" ||
+    operation === "compiler.handoffImport" ||
+    operation === "compiler.mcpCall" ||
+    operation === "compiler.queryRun" ||
+    operation === "compiler.auditList" ||
+    operation === "compiler.auditReview"
+  )
+    return isCompilerResult(operation, value.data);
+  if (
     operation === "codex.status" ||
     operation === "codex.prepare" ||
     operation === "codex.approval" ||
@@ -425,3 +450,10 @@ import {
   type DecisionResults,
 } from "./decisions.ts";
 export * from "./decisions.ts";
+import {
+  isCompilerResult,
+  parseCompilerRequest,
+  type CompilerRequests,
+  type CompilerResults,
+} from "./context-compiler.ts";
+export * from "./context-compiler.ts";

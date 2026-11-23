@@ -22,6 +22,7 @@ fn main() {
         "task_request",
         "working_request",
         "resume_request",
+        "compiler_request",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(commands))
         .expect("falha ao configurar o host Tauri");

@@ -101,6 +101,22 @@ test("workspace profile retains the CLI restrictions and disables further integr
   ])
     assert.ok(args.includes(value), value);
   assert.ok(args.every((arg) => !arg.startsWith("--dangerously-")));
+
+  const withMcp = workspaceCodexExecArgs("fixture", {
+    mcpGateway: {
+      command: "C:\\Laplace\\laplace-node.exe",
+      args: ["C:\\Laplace\\sidecar\\mcp-gateway.cjs", "C:\\data"],
+    },
+  });
+  assert.ok(!withMcp.includes("mcp_servers={}"));
+  assert.ok(
+    withMcp.includes(
+      'mcp_servers.laplace.command="C:\\\\Laplace\\\\laplace-node.exe"',
+    ),
+  );
+  assert.ok(withMcp.includes("mcp_servers.laplace.enabled=true"));
+  assert.ok(withMcp.includes('web_search="disabled"'));
+  assert.ok(withMcp.includes("features.shell_tool=false"));
 });
 
 test("decodes fragmented UTF-8/CRLF, unknown events, usage and completion", () => {

@@ -1,18 +1,19 @@
-import {
-  isContextPath,
-  maxContextFiles,
-  type ContextBrowse,
-  type ContextHistory,
-  type ContextIssue,
-  type ContextSnapshot,
-  type ContextSourcePreview,
-  type ContextStatus,
-  type TaskSource,
+import type {
+  ContextBrowse,
+  ContextHistory,
+  ContextIssue,
+  ContextSnapshot,
+  ContextSourcePreview,
+  ContextStatus,
+  IdentityScope,
+  TaskSource,
 } from "@laplace/contracts";
+import { isContextPath, maxContextFiles } from "@laplace/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type createDesktopClient, errorMessage } from "./ipc";
 import { createLatestRequest } from "./workspace";
 import { CodexQueryView } from "./CodexQueryView";
+import { ContextCompilerView } from "./ContextCompilerView";
 import { ContextSearchView } from "./ContextSearchView";
 import { omissionLabels } from "./contextLabels";
 
@@ -111,14 +112,18 @@ function SnapshotDetail({
 export function ContextView({
   projectId,
   projectName,
+  scope,
   client,
   codex,
+  compiler,
   onCreateTask,
 }: {
   projectId: string;
   projectName: string;
+  scope: IdentityScope | null;
   client: Client;
   codex: ReturnType<typeof createDesktopClient>["codex"];
+  compiler: ReturnType<typeof createDesktopClient>["compiler"];
   onCreateTask: (source: TaskSource, question: string) => void;
 }) {
   const [browse, setBrowse] = useState<Load<ContextBrowse>>({
@@ -284,6 +289,13 @@ export function ContextView({
         onCreateTask={onCreateTask}
         snapshot={snapshot}
         excerpts={excerpts}
+      />
+      <ContextCompilerView
+        key={`f2-${projectId}/${scope?.worktreeId ?? "unverified"}`}
+        scope={scope}
+        projectName={projectName}
+        snapshot={snapshot}
+        client={compiler}
       />
       <div className="context-grid">
         <section className="panel" aria-labelledby="context-sources">

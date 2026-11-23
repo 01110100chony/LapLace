@@ -112,6 +112,18 @@ await build({
     __LAPLACE_DEVELOPMENT__: JSON.stringify(development),
   },
 });
+await build({
+  entryPoints: [
+    fileURLToPath(
+      new URL("../../local-service/src/mcp-stdio.ts", import.meta.url),
+    ),
+  ],
+  outfile: join(output, "mcp-gateway.cjs"),
+  bundle: true,
+  platform: "node",
+  target: "node24",
+  format: "cjs",
+});
 await prepareNotices(target, output);
 
 const jobManifest = fileURLToPath(

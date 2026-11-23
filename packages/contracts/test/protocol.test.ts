@@ -677,3 +677,483 @@ test("F1-M04: valida contratos decision.* (evidenceResolve, record, list, get, p
     ),
   );
 });
+
+test("F2-T01.A1: valida todas as 10 operações compiler.* e rejeita escopo trocado, opaqueRef inválido e invariantes inconsistentes", () => {
+  const scope = {
+    projectId: "a".repeat(64),
+    bindingId: "b".repeat(64),
+    worktreeId: "c".repeat(64),
+  };
+  const otherScope = {
+    ...scope,
+    bindingId: "9".repeat(64),
+  };
+  const digest = "d".repeat(64);
+  const manifestDigest = "e".repeat(64);
+  const packageDigest = "f".repeat(64);
+  const now = "2026-11-23T05:00:00.000Z";
+  const opaqueRef = `ref-${"1".repeat(16)}`;
+  const itemText = "Manter invariante de contrato F2.";
+
+  const compileReq = {
+    ...envelope,
+    operation: "compiler.compile",
+    ...scope,
+    objective: "Explicar contrato do compilador.",
+    destinationId: "codex_mock",
+    budgetBytes: 4096,
+    policyVersion: "f2-policy-v1",
+    strategyVersion: "f2-deterministic-v1",
+  };
+  assert.deepEqual(parseRequest(compileReq), compileReq);
+  assert.equal(parseRequest({ ...compileReq, budgetBytes: 128 }), undefined);
+  assert.equal(parseRequest({ ...compileReq, objective: "   " }), undefined);
+
+  const grantIssueReq = {
+    ...envelope,
+    operation: "compiler.grantIssue",
+    ...scope,
+    sessionId: "session-1",
+    manifestDigest,
+    policyVersion: "f2-policy-v1",
+    destinationId: "codex_mock",
+    allowedOperations: ["summary", "search", "read", "package", "query"],
+    ttlMs: 60_000,
+    humanConfirmed: false,
+  };
+  assert.deepEqual(parseRequest(grantIssueReq), grantIssueReq);
+  assert.equal(
+    parseRequest({ ...grantIssueReq, allowedOperations: [] }),
+    undefined,
+  );
+
+  const grantListReq = {
+    ...envelope,
+    operation: "compiler.grantList",
+    ...scope,
+  };
+  assert.deepEqual(parseRequest(grantListReq), grantListReq);
+
+  const grantRevokeReq = {
+    ...envelope,
+    operation: "compiler.grantRevoke",
+    ...scope,
+    grantId: "grant-1",
+    reason: "Revogado em teste",
+  };
+  assert.deepEqual(parseRequest(grantRevokeReq), grantRevokeReq);
+
+  const packageExportReq = {
+    ...envelope,
+    operation: "compiler.packageExport",
+    ...scope,
+    grantId: "grant-1",
+    sessionId: "session-1",
+    manifestDigest,
+    policyVersion: "f2-policy-v1",
+    destinationId: "codex_mock",
+    includeHandoff: true,
+  };
+  assert.deepEqual(parseRequest(packageExportReq), packageExportReq);
+
+  const mcpCallReq = {
+    ...envelope,
+    operation: "compiler.mcpCall",
+    ...scope,
+    grantId: "grant-1",
+    sessionId: "session-1",
+    manifestDigest,
+    policyVersion: "f2-policy-v1",
+    destinationId: "codex_mock",
+    method: "read",
+    opaqueRef,
+  };
+  assert.deepEqual(parseRequest(mcpCallReq), mcpCallReq);
+
+  const queryRunReq = {
+    ...envelope,
+    operation: "compiler.queryRun",
+    ...scope,
+    grantId: "grant-1",
+    sessionId: "session-1",
+    manifestDigest,
+    policyVersion: "f2-policy-v1",
+    destinationId: "codex_mock",
+    channel: "mcp_stdio",
+    mode: "mock_development",
+  };
+  assert.deepEqual(parseRequest(queryRunReq), queryRunReq);
+
+  const auditListReq = {
+    ...envelope,
+    operation: "compiler.auditList",
+    ...scope,
+  };
+  assert.deepEqual(parseRequest(auditListReq), auditListReq);
+
+  const auditReviewReq = {
+    ...envelope,
+    operation: "compiler.auditReview",
+    ...scope,
+    auditId: "audit-1",
+    status: "approved",
+    reviewer: "Autor Local",
+    note: "Citações conferidas",
+    humanConfirmed: true,
+  };
+  assert.deepEqual(parseRequest(auditReviewReq), auditReviewReq);
+
+  const publicItem = {
+    opaqueRef,
+    ordinal: 0,
+    kind: "decision",
+    tier: "invariant_canonical",
+    mandatory: true,
+    version: "1",
+    contentDigest: digest,
+    bytes: Buffer.byteLength(itemText),
+    rationale: "Decisão canônica obrigatória.",
+    anchor: {
+      kind: "decision",
+      assertionId: "2".repeat(64),
+      revisionId: "3".repeat(64),
+      revision: 1,
+    },
+  };
+  const publicManifest = {
+    schemaVersion: 1,
+    scope,
+    objective: compileReq.objective,
+    destinationId: "codex_mock",
+    policyVersion: "f2-policy-v1",
+    strategyVersion: "f2-deterministic-v1",
+    status: "ready",
+    recommendationSuspended: false,
+    suspensionReason: null,
+    budget: {
+      limitBytes: 4096,
+      mandatoryBytes: Buffer.byteLength(itemText),
+      selectedBytes: Buffer.byteLength(itemText),
+      remainingBytes: 4096 - Buffer.byteLength(itemText),
+      estimatedTokens: 9,
+      exceededByBytes: 0,
+    },
+    items: [publicItem],
+    conflicts: [],
+    omissions: [],
+    manifestDigest,
+  };
+  const preview = {
+    scope,
+    compiledAt: now,
+    destination: {
+      id: "codex_mock",
+      label: "Mock local de desenvolvimento",
+      known: true,
+      executionMode: "mock_development",
+      deliveryAllowed: true,
+      allowsLocalOnly: false,
+      blockReason: null,
+    },
+    manifestDigest,
+    publicManifest,
+    localItems: [
+      {
+        ...publicItem,
+        candidateId: "cand-1",
+        title: "Decisão canônica",
+        visibility: "canonical_verified",
+        capturedAt: now,
+      },
+    ],
+    localOmissions: [],
+    mandatoryOverflowItems: [],
+  };
+  assert.ok(
+    isResponse(
+      { ...envelope, ok: true, operation: "compiler.compile", data: preview },
+      envelope.id,
+      "compiler.compile",
+    ),
+  );
+  // mandatory_context_exceeded with non-empty publicManifest.items must fail validation.
+  assert.ok(
+    !isResponse(
+      {
+        ...envelope,
+        ok: true,
+        operation: "compiler.compile",
+        data: {
+          ...preview,
+          publicManifest: {
+            ...publicManifest,
+            status: "mandatory_context_exceeded",
+            budget: { ...publicManifest.budget, exceededByBytes: 120 },
+          },
+        },
+      },
+      envelope.id,
+      "compiler.compile",
+    ),
+  );
+  // Cross-scope nested manifest must fail validation.
+  assert.ok(
+    !isResponse(
+      {
+        ...envelope,
+        ok: true,
+        operation: "compiler.compile",
+        data: {
+          ...preview,
+          publicManifest: { ...publicManifest, scope: otherScope },
+        },
+      },
+      envelope.id,
+      "compiler.compile",
+    ),
+  );
+  // Invalid opaqueRef must fail validation.
+  assert.ok(
+    !isResponse(
+      {
+        ...envelope,
+        ok: true,
+        operation: "compiler.compile",
+        data: {
+          ...preview,
+          publicManifest: {
+            ...publicManifest,
+            items: [{ ...publicItem, opaqueRef: "../secret.ts" }],
+          },
+        },
+      },
+      envelope.id,
+      "compiler.compile",
+    ),
+  );
+
+  const grantRecord = {
+    grantId: "grant-1",
+    sessionId: "session-1",
+    scope,
+    manifestDigest,
+    policyVersion: "f2-policy-v1",
+    destinationId: "codex_mock",
+    allowedOperations: ["summary", "search", "read", "package", "query"],
+    issuedAt: now,
+    expiresAt: "2026-11-23T05:05:00.000Z",
+    revokedAt: null,
+    revokeReason: null,
+    status: "active",
+  };
+  assert.ok(
+    isResponse(
+      {
+        ...envelope,
+        ok: true,
+        operation: "compiler.grantIssue",
+        data: grantRecord,
+      },
+      envelope.id,
+      "compiler.grantIssue",
+    ),
+  );
+
+  const pkg = {
+    schemaVersion: 1,
+    packageId: "pkg-1",
+    createdAt: now,
+    manifestDigest,
+    policyVersion: "f2-policy-v1",
+    strategyVersion: "f2-deterministic-v1",
+    destinationId: "codex_mock",
+    publicManifest,
+    items: [
+      {
+        opaqueRef,
+        version: "1",
+        tier: "invariant_canonical",
+        mandatory: true,
+        contentDigest: digest,
+        bytes: Buffer.byteLength(itemText),
+        anchor: publicItem.anchor,
+        text: itemText,
+      },
+    ],
+    packageDigest,
+  };
+  const handoff = {
+    schemaVersion: 1,
+    handoffId: "handoff-1",
+    createdAt: now,
+    sourceProjectId: scope.projectId,
+    objective: compileReq.objective,
+    manifestDigest,
+    policyVersion: "f2-policy-v1",
+    strategyVersion: "f2-deterministic-v1",
+    destinationHint: "codex_mock",
+    selectedRefs: [
+      {
+        opaqueRef,
+        version: "1",
+        tier: "invariant_canonical",
+        contentDigest: digest,
+        bytes: Buffer.byteLength(itemText),
+      },
+    ],
+    pendingConflicts: [],
+    openQuestions: [],
+    requiresReevaluation: true,
+  };
+  assert.ok(
+    isResponse(
+      {
+        ...envelope,
+        ok: true,
+        operation: "compiler.packageExport",
+        data: { scope, grantId: "grant-1", contextPackage: pkg, handoff },
+      },
+      envelope.id,
+      "compiler.packageExport",
+    ),
+  );
+  // Handoff without requiresReevaluation === true must be rejected.
+  assert.ok(
+    !isResponse(
+      {
+        ...envelope,
+        ok: true,
+        operation: "compiler.packageExport",
+        data: {
+          scope,
+          grantId: "grant-1",
+          contextPackage: pkg,
+          handoff: { ...handoff, requiresReevaluation: false },
+        },
+      },
+      envelope.id,
+      "compiler.packageExport",
+    ),
+  );
+
+  const importReq = {
+    ...envelope,
+    operation: "compiler.handoffImport",
+    ...scope,
+    destinationId: "codex_mock",
+    humanConfirmed: true,
+    handoff,
+  };
+  assert.deepEqual(parseRequest(importReq), importReq);
+  assert.equal(
+    parseRequest({
+      ...envelope,
+      operation: "compiler.handoffImport",
+      ...scope,
+      destinationId: "codex_mock",
+      humanConfirmed: true,
+    }),
+    undefined,
+  );
+  assert.ok(
+    isResponse(
+      {
+        ...envelope,
+        ok: true,
+        operation: "compiler.handoffImport",
+        data: {
+          scope,
+          evaluation: "accepted_requires_grant",
+          requiresNewGrant: true,
+          sourceProjectId: scope.projectId,
+          manifestDigest,
+          destination: preview.destination,
+          reason: "Reavaliação aprovada; emita novo grant nesta sessão.",
+          selectedRefCount: 1,
+          pendingConflicts: [],
+        },
+      },
+      envelope.id,
+      "compiler.handoffImport",
+    ),
+  );
+
+  const auditRecord = {
+    auditId: "audit-1",
+    scope,
+    grantId: "grant-1",
+    sessionId: "session-1",
+    manifestDigest,
+    policyVersion: "f2-policy-v1",
+    destinationId: "codex_mock",
+    channel: "mcp_stdio",
+    mode: "mock_development",
+    objective: compileReq.objective,
+    state: "completed",
+    failureCode: null,
+    delivered: {
+      digest: manifestDigest,
+      bytes: Buffer.byteLength(itemText),
+      opaqueRefs: [opaqueRef],
+    },
+    observability: "mcp_observed",
+    observedReads: [
+      {
+        tool: "laplace_context_read",
+        opaqueRef,
+        query: null,
+        cursor: null,
+        outcome: "allowed",
+        errorCode: null,
+        at: now,
+      },
+    ],
+    mcpAdherence: "observed",
+    responseText: `Resposta referenciando [${opaqueRef}].`,
+    citations: {
+      declared: [
+        {
+          opaqueRef,
+          verified: true,
+          version: "1",
+          contentDigest: digest,
+        },
+      ],
+      unknown: [],
+    },
+    durationMs: 12,
+    usage: { input: 10, cachedInput: 0, output: 5 },
+    startedAt: now,
+    finishedAt: now,
+    review: {
+      status: "approved",
+      reviewer: "Autor Local",
+      note: "Conferido.",
+      reviewedAt: now,
+    },
+  };
+  assert.ok(
+    isResponse(
+      {
+        ...envelope,
+        ok: true,
+        operation: "compiler.queryRun",
+        data: auditRecord,
+      },
+      envelope.id,
+      "compiler.queryRun",
+    ),
+  );
+  assert.ok(
+    isResponse(
+      {
+        ...envelope,
+        ok: true,
+        operation: "compiler.auditList",
+        data: { scope, items: [auditRecord] },
+      },
+      envelope.id,
+      "compiler.auditList",
+    ),
+  );
+});

@@ -26,6 +26,7 @@
     "allow-task-request",
     "allow-working-request",
     "allow-resume-request",
+    "allow-compiler-request",
     "core:window:allow-is-decorated",
     "core:window:allow-is-maximized",
     "core:window:allow-start-dragging",

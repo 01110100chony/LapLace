@@ -27,12 +27,12 @@ import {
 } from "@laplace/contracts";
 
 import { sha256 } from "../src/context.ts";
-import { openCatalog } from "../src/catalog.ts";
+import { openCatalog, catalogSchemaVersion } from "../src/catalog.ts";
 import { CodexQueries, prepareCodex } from "../src/codex.ts";
 import { fixture, git } from "./fixtures/ipc-harness.ts";
 
 const dropIdentitySchema =
-  "DROP TABLE decision_purge_tombstones; DROP TABLE decision_evidence_links; DROP TABLE decision_revisions; DROP TABLE decisions; DROP TABLE worktrees; DROP TABLE local_repo_bindings; DROP TABLE logical_projects;";
+  "DROP TABLE f2_mcp_access_log; DROP TABLE f2_query_audits; DROP TABLE f2_session_grants; DROP TABLE f2_compiled_manifests; DROP TABLE decision_purge_tombstones; DROP TABLE decision_evidence_links; DROP TABLE decision_revisions; DROP TABLE decisions; DROP TABLE worktrees; DROP TABLE local_repo_bindings; DROP TABLE logical_projects;";
 const dropTaskResultSchema = `${dropIdentitySchema} DROP TABLE result_reviews; DROP TABLE working_blobs; DROP TABLE working_snapshots; DROP TABLE task_result_files; DROP TABLE task_results;`;
 const dropExecutionSchema = `
   ${dropTaskResultSchema}
@@ -275,7 +275,7 @@ test(
       using database = new DatabaseSync(env.database);
       assert.equal(
         database.prepare("PRAGMA user_version").get()?.user_version,
-        12,
+        catalogSchemaVersion,
       );
       for (const table of ["context_snapshots", "codex_history", "tasks"]) {
         assert.equal(
@@ -835,7 +835,7 @@ test(
     try {
       assert.equal(
         database.prepare("PRAGMA user_version").get()?.user_version,
-        12,
+        catalogSchemaVersion,
       );
     } finally {
       database.close();
@@ -1228,7 +1228,8 @@ test(
 
     const database = new DatabaseSync(env.database);
     try {
-      database.exec("PRAGMA user_version = 13");
+      const futureVersion = catalogSchemaVersion + 1;
+      database.exec(`PRAGMA user_version = ${futureVersion}`);
       const second = env.start();
       await assert.rejects(second.request("workspace.list"), {
         message: "catalog_unavailable",
@@ -1236,9 +1237,9 @@ test(
       await second.close();
       assert.equal(
         database.prepare("PRAGMA user_version").get()?.user_version,
-        13,
+        futureVersion,
       );
-      database.exec("PRAGMA user_version = 12");
+      database.exec(`PRAGMA user_version = ${catalogSchemaVersion}`);
     } finally {
       database.close();
     }
@@ -1308,7 +1309,7 @@ test(
     );
     assert.equal(
       database.prepare("PRAGMA user_version").get()?.user_version,
-      12,
+      catalogSchemaVersion,
     );
     assert.equal(
       database

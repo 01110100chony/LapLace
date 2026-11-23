@@ -244,6 +244,7 @@ export function App() {
               }
               contextClient={desktop.context}
               codexClient={desktop.codex}
+              compilerClient={desktop.compiler}
               taskClient={desktop.task}
               executionClient={desktop.execution}
               workingClient={desktop.working}

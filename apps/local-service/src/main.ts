@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline";
 import { once } from "node:events";
-import { isAbsolute } from "node:path";
+import { existsSync } from "node:fs";
+import { dirname, isAbsolute, join } from "node:path";
 import { codexMockScenarios } from "@laplace/agents/mock";
 import {
   isRecord,
@@ -19,6 +20,11 @@ import { CodexQueries, prepareCodex, type CodexDevelopment } from "./codex.ts";
 import { TaskSupervisor } from "./task-supervisor.ts";
 import { captureWorkingTree, listWorkingTree } from "./working-tree.ts";
 import { createResumeService } from "./resume-service.ts";
+import { createContextCompilerService } from "./context-compiler-service.ts";
+import { createSessionGrantService } from "./session-grant-store.ts";
+import { createMcpGatewayService } from "./mcp-gateway.ts";
+import { createContextPackageService } from "./context-package.ts";
+import { createAuditQueryService } from "./audit-query-service.ts";
 
 // Defined when the sidecar is bundled. The source entry point and the
 // distribution bundle ignore all development arguments.
@@ -91,6 +97,35 @@ const resumeService = createResumeService({
   withCatalog,
   contextOptions,
   getSelectionGeneration: () => selectionGeneration,
+});
+
+const entryDir = dirname(process.argv[1] ?? process.cwd());
+const bundledMcpGateway = join(entryDir, "mcp-gateway.cjs");
+const mcpEntry = existsSync(bundledMcpGateway)
+  ? bundledMcpGateway
+  : join(entryDir, "mcp-stdio.ts");
+
+const compilerService = createContextCompilerService({ withCatalog });
+const grantService = createSessionGrantService({ withCatalog });
+const mcpGatewayService = createMcpGatewayService({
+  withCatalog,
+  grants: grantService,
+});
+const packageService = createContextPackageService({
+  withCatalog,
+  grants: grantService,
+});
+const auditQueryService = createAuditQueryService({
+  withCatalog,
+  grants: grantService,
+  packages: packageService,
+  dataDir,
+  mcpEntry,
+  currentMode: codex.mode,
+  workspaceHelper:
+    development?.mode === "unconfined_workspace_development"
+      ? development.helper
+      : undefined,
 });
 
 async function respond(line: string): Promise<Response> {
@@ -228,6 +263,91 @@ async function respond(line: string): Promise<Response> {
         request.correlationId,
         exit.signal,
       );
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "compiler.compile") {
+      const data = compilerService.compile(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "compiler.grantIssue") {
+      const data = grantService.issue(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "compiler.grantList") {
+      const data = {
+        scope: {
+          projectId: request.projectId,
+          bindingId: request.bindingId,
+          worktreeId: request.worktreeId,
+        },
+        items: grantService.list(
+          {
+            projectId: request.projectId,
+            bindingId: request.bindingId,
+            worktreeId: request.worktreeId,
+          },
+          request.manifestDigest,
+        ),
+      };
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "compiler.grantRevoke") {
+      const data = grantService.revoke(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "compiler.packageExport") {
+      const data = packageService.exportPackage(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "compiler.handoffImport") {
+      const data = packageService.importHandoff(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "compiler.mcpCall") {
+      const data = mcpGatewayService.callTool(
+        {
+          scope: {
+            projectId: request.projectId,
+            bindingId: request.bindingId,
+            worktreeId: request.worktreeId,
+          },
+          grantId: request.grantId,
+          sessionId: request.sessionId,
+          destinationId: request.destinationId,
+          manifestDigest: request.manifestDigest,
+          policyVersion: request.policyVersion,
+        },
+        request.method,
+        {
+          query: request.query,
+          cursor: request.cursor,
+          limit: request.limit,
+          opaqueRef: request.opaqueRef,
+        },
+      );
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "compiler.queryRun") {
+      if (exit.signal.aborted) {
+        throw new GitError("codex_execution_unavailable");
+      }
+      const data = await auditQueryService.runQuery(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "compiler.auditList") {
+      const scope = {
+        projectId: request.projectId,
+        bindingId: request.bindingId,
+        worktreeId: request.worktreeId,
+      };
+      const data = {
+        scope,
+        items: auditQueryService.listAudits(scope, request.manifestDigest),
+      };
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "compiler.auditReview") {
+      const data = auditQueryService.reviewAudit(request);
       return { ...envelope, operation: request.operation, ok: true, data };
     }
     const project = withCatalog((store) => store.lookup(request.projectId));

@@ -459,3 +459,186 @@ test("F1-T10.A1 e F1-T11: valida desktop.identity, desktop.resume e desktop.deci
     code: "invalid_response",
   });
 });
+
+test("F2-T04 / F2-T10: desktop.compiler valida operações compiler.* e rejeita escopo cruzado", async () => {
+  const scope = {
+    projectId: "a".repeat(64),
+    bindingId: "b".repeat(64),
+    worktreeId: "c".repeat(64),
+  };
+  const wrongScope = { ...scope, worktreeId: "9".repeat(64) };
+  const manifestDigest = "e".repeat(64);
+  const contentDigest = "d".repeat(64);
+  const opaqueRef = `ref-${"1".repeat(16)}`;
+  const now = "2026-11-23T06:00:00.000Z";
+  let returnWrongScope = false;
+
+  const item = {
+    opaqueRef,
+    ordinal: 0,
+    kind: "decision",
+    tier: "invariant_canonical",
+    mandatory: true,
+    version: "rev-1",
+    contentDigest,
+    bytes: 18,
+    rationale: "Decisão canônica.",
+    anchor: {
+      kind: "decision",
+      assertionId: "2".repeat(64),
+      revisionId: "3".repeat(64),
+      revision: 1,
+    },
+  };
+  const publicManifest = {
+    schemaVersion: 1,
+    scope,
+    objective: "Validar cliente desktop F2",
+    destinationId: "codex_mock",
+    policyVersion: "f2-policy-v1",
+    strategyVersion: "f2-deterministic-v1",
+    status: "ready",
+    recommendationSuspended: false,
+    suspensionReason: null,
+    budget: {
+      limitBytes: 4096,
+      mandatoryBytes: 18,
+      selectedBytes: 18,
+      remainingBytes: 4078,
+      estimatedTokens: 5,
+      exceededByBytes: 0,
+    },
+    items: [item],
+    conflicts: [],
+    omissions: [],
+    manifestDigest,
+  };
+
+  const client = createDesktopClient(async (command, args) => {
+    assert.equal(command, "compiler_request");
+    const id = args.id as string;
+    const req = args.request as Record<string, unknown>;
+    const op = req.operation as string;
+    const responseScope = returnWrongScope ? wrongScope : scope;
+
+    if (op === "compiler.compile") {
+      return {
+        version: protocolVersion,
+        id,
+        ok: true,
+        operation: op,
+        data: {
+          scope: responseScope,
+          compiledAt: now,
+          destination: {
+            id: "codex_mock",
+            label: "Codex Mock",
+            known: true,
+            executionMode: "mock_development",
+            deliveryAllowed: true,
+            allowsLocalOnly: false,
+            blockReason: null,
+          },
+          manifestDigest,
+          publicManifest: { ...publicManifest, scope: responseScope },
+          localItems: [
+            {
+              ...item,
+              candidateId: "cand-1",
+              title: "Invariante",
+              visibility: "canonical_verified",
+              capturedAt: now,
+            },
+          ],
+          localOmissions: [],
+          mandatoryOverflowItems: [],
+        },
+      };
+    }
+
+    if (op === "compiler.grantIssue" || op === "compiler.grantRevoke") {
+      return {
+        version: protocolVersion,
+        id,
+        ok: true,
+        operation: op,
+        data: {
+          grantId: "grant-1",
+          sessionId: "session-1",
+          scope: responseScope,
+          manifestDigest,
+          policyVersion: "f2-policy-v1",
+          destinationId: "codex_mock",
+          allowedOperations: ["summary", "search", "read", "package", "query"],
+          issuedAt: now,
+          expiresAt: "2026-11-23T06:05:00.000Z",
+          revokedAt: op === "compiler.grantRevoke" ? now : null,
+          revokeReason: op === "compiler.grantRevoke" ? "Teste" : null,
+          status: op === "compiler.grantRevoke" ? "revoked" : "active",
+        },
+      };
+    }
+
+    if (op === "compiler.grantList") {
+      return {
+        version: protocolVersion,
+        id,
+        ok: true,
+        operation: op,
+        data: { scope: responseScope, items: [] },
+      };
+    }
+
+    if (op === "compiler.auditList") {
+      return {
+        version: protocolVersion,
+        id,
+        ok: true,
+        operation: op,
+        data: { scope: responseScope, items: [] },
+      };
+    }
+
+    assert.fail(`unexpected op: ${op}`);
+  });
+
+  const compiled = await client.compiler.compile({
+    ...scope,
+    objective: "Validar cliente desktop F2",
+    destinationId: "codex_mock",
+    budgetBytes: 4096,
+  });
+  assert.equal(compiled.manifestDigest, manifestDigest);
+
+  const grant = await client.compiler.grantIssue({
+    ...scope,
+    sessionId: "session-1",
+    manifestDigest,
+    policyVersion: "f2-policy-v1",
+    destinationId: "codex_mock",
+    allowedOperations: ["summary", "search", "read", "package", "query"],
+    humanConfirmed: true,
+  });
+  assert.equal(grant.status, "active");
+
+  const revoked = await client.compiler.grantRevoke({
+    ...scope,
+    grantId: grant.grantId,
+    reason: "Teste",
+  });
+  assert.equal(revoked.status, "revoked");
+
+  assert.equal((await client.compiler.grantList(scope)).items.length, 0);
+  assert.equal((await client.compiler.auditList(scope)).items.length, 0);
+
+  returnWrongScope = true;
+  await assert.rejects(
+    client.compiler.compile({
+      ...scope,
+      objective: "Validar cliente desktop F2",
+      destinationId: "codex_mock",
+      budgetBytes: 4096,
+    }),
+    { code: "invalid_response" },
+  );
+});

@@ -66,6 +66,14 @@ pub enum ErrorCode {
     DecisionAuthorizationRequired,
     DecisionPurgePending,
     ResumeStale,
+    CompilerInvalidInput,
+    DestinationUnknown,
+    DestinationDenied,
+    GrantInvalid,
+    GrantRevoked,
+    GrantExpired,
+    HandoffInvalid,
+    AuditUnavailable,
     CloneUnavailable,
     CloneBusy,
     CloneDestinationExists,
@@ -317,6 +325,26 @@ enum Payload {
     DecisionGet(ScopePayload),
     #[serde(rename = "decision.purge")]
     DecisionPurge(ScopePayload),
+    #[serde(rename = "compiler.compile")]
+    CompilerCompile(ScopePayload),
+    #[serde(rename = "compiler.grantIssue")]
+    CompilerGrantIssue(ScopePayload),
+    #[serde(rename = "compiler.grantList")]
+    CompilerGrantList(ScopePayload),
+    #[serde(rename = "compiler.grantRevoke")]
+    CompilerGrantRevoke(ScopePayload),
+    #[serde(rename = "compiler.packageExport")]
+    CompilerPackageExport(ScopePayload),
+    #[serde(rename = "compiler.handoffImport")]
+    CompilerHandoffImport(ScopePayload),
+    #[serde(rename = "compiler.mcpCall")]
+    CompilerMcpCall(ScopePayload),
+    #[serde(rename = "compiler.queryRun")]
+    CompilerQueryRun(ScopePayload),
+    #[serde(rename = "compiler.auditList")]
+    CompilerAuditList(ScopePayload),
+    #[serde(rename = "compiler.auditReview")]
+    CompilerAuditReview(ScopePayload),
 }
 
 impl Payload {
@@ -372,6 +400,16 @@ impl Payload {
             Self::DecisionList(_) => "decision.list",
             Self::DecisionGet(_) => "decision.get",
             Self::DecisionPurge(_) => "decision.purge",
+            Self::CompilerCompile(_) => "compiler.compile",
+            Self::CompilerGrantIssue(_) => "compiler.grantIssue",
+            Self::CompilerGrantList(_) => "compiler.grantList",
+            Self::CompilerGrantRevoke(_) => "compiler.grantRevoke",
+            Self::CompilerPackageExport(_) => "compiler.packageExport",
+            Self::CompilerHandoffImport(_) => "compiler.handoffImport",
+            Self::CompilerMcpCall(_) => "compiler.mcpCall",
+            Self::CompilerQueryRun(_) => "compiler.queryRun",
+            Self::CompilerAuditList(_) => "compiler.auditList",
+            Self::CompilerAuditReview(_) => "compiler.auditReview",
         }
     }
 
@@ -428,7 +466,17 @@ impl Payload {
             | Self::DecisionComparePresent(data)
             | Self::DecisionList(data)
             | Self::DecisionGet(data)
-            | Self::DecisionPurge(data) => data.scope.valid(),
+            | Self::DecisionPurge(data)
+            | Self::CompilerCompile(data)
+            | Self::CompilerGrantIssue(data)
+            | Self::CompilerGrantList(data)
+            | Self::CompilerGrantRevoke(data)
+            | Self::CompilerPackageExport(data)
+            | Self::CompilerHandoffImport(data)
+            | Self::CompilerMcpCall(data)
+            | Self::CompilerQueryRun(data)
+            | Self::CompilerAuditList(data)
+            | Self::CompilerAuditReview(data) => data.scope.valid(),
             Self::ContextSearch(data) => {
                 valid_project_id(&data.project_id)
                     && data.context_id.as_deref().is_none_or(valid_project_id)
@@ -514,7 +562,17 @@ impl Response {
                                 | Payload::DecisionComparePresent(data)
                                 | Payload::DecisionList(data)
                                 | Payload::DecisionGet(data)
-                                | Payload::DecisionPurge(data),
+                                | Payload::DecisionPurge(data)
+                                | Payload::CompilerCompile(data)
+                                | Payload::CompilerGrantIssue(data)
+                                | Payload::CompilerGrantList(data)
+                                | Payload::CompilerGrantRevoke(data)
+                                | Payload::CompilerPackageExport(data)
+                                | Payload::CompilerHandoffImport(data)
+                                | Payload::CompilerMcpCall(data)
+                                | Payload::CompilerQueryRun(data)
+                                | Payload::CompilerAuditList(data)
+                                | Payload::CompilerAuditReview(data),
                             ) => {
                                 data.scope.project_id == pid
                                     && data.scope.binding_id == bid
@@ -689,6 +747,8 @@ pub enum Operation<'a> {
     Working(&'a WorkingRequest),
     #[serde(untagged)]
     Resume(&'a ResumeRequest),
+    #[serde(untagged)]
+    Compiler(&'a CompilerRequest),
 }
 
 #[derive(Deserialize, Serialize)]
@@ -1104,6 +1164,289 @@ pub enum ResumeRequest {
     },
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CompilerPreferenceInput {
+    key: String,
+    title: String,
+    content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    mandatory: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    conflict_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    conflict_polarity: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CompilerIdentityScopeInput {
+    project_id: String,
+    binding_id: String,
+    worktree_id: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CompilerExtraCandidateInput {
+    candidate_id: String,
+    kind: String,
+    tier: String,
+    mandatory: bool,
+    visibility: String,
+    version: String,
+    title: String,
+    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scope: Option<CompilerIdentityScopeInput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    conflict_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    conflict_polarity: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    private_metadata: Option<std::collections::BTreeMap<String, String>>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(
+    tag = "operation",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum CompilerRequest {
+    #[serde(rename = "compiler.compile")]
+    Compile {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        objective: String,
+        destination_id: String,
+        budget_bytes: u32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        policy_version: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        strategy_version: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        context_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        selection: Option<Vec<CodexSelection>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        project_preferences: Option<Vec<CompilerPreferenceInput>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        personal_preferences: Option<Vec<CompilerPreferenceInput>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        extra_candidates: Option<Vec<CompilerExtraCandidateInput>>,
+    },
+    #[serde(rename = "compiler.grantIssue")]
+    GrantIssue {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        session_id: String,
+        manifest_digest: String,
+        policy_version: String,
+        destination_id: String,
+        allowed_operations: Vec<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        ttl_ms: Option<u64>,
+        human_confirmed: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        unconfined_confirmed: Option<bool>,
+    },
+    #[serde(rename = "compiler.grantList")]
+    GrantList {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        manifest_digest: Option<String>,
+    },
+    #[serde(rename = "compiler.grantRevoke")]
+    GrantRevoke {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        grant_id: String,
+        reason: String,
+    },
+    #[serde(rename = "compiler.packageExport")]
+    PackageExport {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        grant_id: String,
+        session_id: String,
+        manifest_digest: String,
+        policy_version: String,
+        destination_id: String,
+        include_handoff: bool,
+    },
+    #[serde(rename = "compiler.handoffImport")]
+    HandoffImport {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        destination_id: String,
+        human_confirmed: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        context_package: Option<serde_json::Value>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        handoff: Option<serde_json::Value>,
+    },
+    #[serde(rename = "compiler.mcpCall")]
+    McpCall {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        grant_id: String,
+        session_id: String,
+        manifest_digest: String,
+        policy_version: String,
+        destination_id: String,
+        method: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        query: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cursor: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        limit: Option<u32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        opaque_ref: Option<String>,
+    },
+    #[serde(rename = "compiler.queryRun")]
+    QueryRun {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        grant_id: String,
+        session_id: String,
+        manifest_digest: String,
+        policy_version: String,
+        destination_id: String,
+        channel: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        mode: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        unconfined_confirmed: Option<bool>,
+    },
+    #[serde(rename = "compiler.auditList")]
+    AuditList {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        manifest_digest: Option<String>,
+    },
+    #[serde(rename = "compiler.auditReview")]
+    AuditReview {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        audit_id: String,
+        status: String,
+        reviewer: String,
+        note: String,
+        human_confirmed: bool,
+    },
+}
+
+impl CompilerRequest {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Compile { .. } => "compiler.compile",
+            Self::GrantIssue { .. } => "compiler.grantIssue",
+            Self::GrantList { .. } => "compiler.grantList",
+            Self::GrantRevoke { .. } => "compiler.grantRevoke",
+            Self::PackageExport { .. } => "compiler.packageExport",
+            Self::HandoffImport { .. } => "compiler.handoffImport",
+            Self::McpCall { .. } => "compiler.mcpCall",
+            Self::QueryRun { .. } => "compiler.queryRun",
+            Self::AuditList { .. } => "compiler.auditList",
+            Self::AuditReview { .. } => "compiler.auditReview",
+        }
+    }
+
+    fn project_id(&self) -> &str {
+        match self {
+            Self::Compile { project_id, .. }
+            | Self::GrantIssue { project_id, .. }
+            | Self::GrantList { project_id, .. }
+            | Self::GrantRevoke { project_id, .. }
+            | Self::PackageExport { project_id, .. }
+            | Self::HandoffImport { project_id, .. }
+            | Self::McpCall { project_id, .. }
+            | Self::QueryRun { project_id, .. }
+            | Self::AuditList { project_id, .. }
+            | Self::AuditReview { project_id, .. } => project_id,
+        }
+    }
+
+    fn scope(&self) -> (&str, &str, &str) {
+        match self {
+            Self::Compile {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::GrantIssue {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::GrantList {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::GrantRevoke {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::PackageExport {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::HandoffImport {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::McpCall {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::QueryRun {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::AuditList {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::AuditReview {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            } => (project_id, binding_id, worktree_id),
+        }
+    }
+}
+
 impl ResumeRequest {
     fn name(&self) -> &'static str {
         match self {
@@ -1205,6 +1548,7 @@ impl<'a> Operation<'a> {
             Self::Task(request) => request.name(),
             Self::Working(request) => request.name(),
             Self::Resume(request) => request.name(),
+            Self::Compiler(request) => request.name(),
         }
     }
 
@@ -1226,6 +1570,7 @@ impl<'a> Operation<'a> {
             Self::Task(request) => Some(request.project_id()),
             Self::Working(request) => Some(request.project_id()),
             Self::Resume(request) => Some(request.project_id()),
+            Self::Compiler(request) => Some(request.project_id()),
             _ => None,
         }
     }
@@ -1233,6 +1578,7 @@ impl<'a> Operation<'a> {
     fn scope(self) -> Option<(&'a str, &'a str, &'a str)> {
         match self {
             Self::Resume(request) => request.scope(),
+            Self::Compiler(request) => Some(request.scope()),
             _ => None,
         }
     }
@@ -1807,6 +2153,201 @@ mod resume_tests {
             }))
             .unwrap();
             assert!(!bad_resp.matches("rec-1", op));
+        }
+    }
+
+    #[test]
+    fn all_compiler_variants_round_trip_and_match_scope() {
+        let project_id = "a".repeat(64);
+        let binding_id = "b".repeat(64);
+        let worktree_id = "c".repeat(64);
+        let manifest_digest = "d".repeat(64);
+        let other_id = "9".repeat(64);
+
+        let scope_json = || {
+            serde_json::json!({
+                "projectId": project_id,
+                "bindingId": binding_id,
+                "worktreeId": worktree_id
+            })
+        };
+
+        let cases: Vec<(&str, serde_json::Value)> = vec![
+            (
+                "compiler.compile",
+                serde_json::json!({
+                    "operation": "compiler.compile",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "objective": "Compilar contexto F2",
+                    "destinationId": "codex_mock",
+                    "budgetBytes": 4096,
+                    "policyVersion": "f2-policy-v1",
+                    "strategyVersion": "f2-deterministic-v1"
+                }),
+            ),
+            (
+                "compiler.grantIssue",
+                serde_json::json!({
+                    "operation": "compiler.grantIssue",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "sessionId": "session-1",
+                    "manifestDigest": manifest_digest,
+                    "policyVersion": "f2-policy-v1",
+                    "destinationId": "codex_mock",
+                    "allowedOperations": ["summary", "search", "read", "package", "query"],
+                    "ttlMs": 60000,
+                    "humanConfirmed": true
+                }),
+            ),
+            (
+                "compiler.grantList",
+                serde_json::json!({
+                    "operation": "compiler.grantList",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "manifestDigest": manifest_digest
+                }),
+            ),
+            (
+                "compiler.grantRevoke",
+                serde_json::json!({
+                    "operation": "compiler.grantRevoke",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "grantId": "grant-1",
+                    "reason": "Revogação de teste"
+                }),
+            ),
+            (
+                "compiler.packageExport",
+                serde_json::json!({
+                    "operation": "compiler.packageExport",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "grantId": "grant-1",
+                    "sessionId": "session-1",
+                    "manifestDigest": manifest_digest,
+                    "policyVersion": "f2-policy-v1",
+                    "destinationId": "codex_mock",
+                    "includeHandoff": true
+                }),
+            ),
+            (
+                "compiler.handoffImport",
+                serde_json::json!({
+                    "operation": "compiler.handoffImport",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "destinationId": "codex_mock",
+                    "humanConfirmed": true,
+                    "handoff": { "manifestDigest": manifest_digest }
+                }),
+            ),
+            (
+                "compiler.mcpCall",
+                serde_json::json!({
+                    "operation": "compiler.mcpCall",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "grantId": "grant-1",
+                    "sessionId": "session-1",
+                    "manifestDigest": manifest_digest,
+                    "policyVersion": "f2-policy-v1",
+                    "destinationId": "codex_mock",
+                    "method": "summary"
+                }),
+            ),
+            (
+                "compiler.queryRun",
+                serde_json::json!({
+                    "operation": "compiler.queryRun",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "grantId": "grant-1",
+                    "sessionId": "session-1",
+                    "manifestDigest": manifest_digest,
+                    "policyVersion": "f2-policy-v1",
+                    "destinationId": "codex_mock",
+                    "channel": "mcp_stdio",
+                    "mode": "mock_development"
+                }),
+            ),
+            (
+                "compiler.auditList",
+                serde_json::json!({
+                    "operation": "compiler.auditList",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id
+                }),
+            ),
+            (
+                "compiler.auditReview",
+                serde_json::json!({
+                    "operation": "compiler.auditReview",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "auditId": "audit-1",
+                    "status": "approved",
+                    "reviewer": "Operador",
+                    "note": "Citações verificadas.",
+                    "humanConfirmed": true
+                }),
+            ),
+        ];
+
+        for (op_name, req_json) in cases {
+            let req: CompilerRequest = serde_json::from_value(req_json.clone()).unwrap();
+            let op = Operation::Compiler(&req);
+            assert_eq!(op.name(), op_name);
+            assert_eq!(serde_json::to_value(op).unwrap(), req_json);
+
+            let mut extra = req_json;
+            extra["unexpectedField"] = true.into();
+            assert!(serde_json::from_value::<CompilerRequest>(extra).is_err());
+
+            let ok_resp: Response = serde_json::from_value(serde_json::json!({
+                "version": VERSION,
+                "id": "comp-1",
+                "ok": true,
+                "operation": op_name,
+                "data": { "scope": scope_json() }
+            }))
+            .unwrap();
+            assert!(
+                ok_resp.matches("comp-1", op),
+                "{op_name} should match scope"
+            );
+
+            let bad_resp: Response = serde_json::from_value(serde_json::json!({
+                "version": VERSION,
+                "id": "comp-1",
+                "ok": true,
+                "operation": op_name,
+                "data": {
+                    "scope": {
+                        "projectId": project_id,
+                        "bindingId": other_id,
+                        "worktreeId": worktree_id
+                    }
+                }
+            }))
+            .unwrap();
+            assert!(
+                !bad_resp.matches("comp-1", op),
+                "{op_name} must reject swapped bindingId"
+            );
         }
     }
 }

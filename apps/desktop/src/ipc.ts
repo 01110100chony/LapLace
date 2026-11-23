@@ -3,17 +3,25 @@ import {
   isIpcError,
   isResponse,
   contextSearchPageSize,
+  type AuditedQueryRunInput,
+  type AuditReviewInput,
   type CodexExecution,
   type CodexPrepare,
   type CodexPreview,
+  type CompilerCompileInput,
   type ContextSearchInput,
   type ContextSourceRef,
   type DecisionEvidenceInput,
   type DecisionPurgeInput,
   type DecisionRecordInput,
   type ErrorCode,
+  type GrantIssueInput,
+  type GrantRevokeInput,
+  type HandoffImportInput,
   type IdentityScope,
+  type McpCallInput,
   type Operation,
+  type PackageExportInput,
   type ReviewInput,
   type Results,
   type TaskDraft,
@@ -47,7 +55,8 @@ type DesktopCommand =
   | "codex_request"
   | "task_request"
   | "working_request"
-  | "resume_request";
+  | "resume_request"
+  | "compiler_request";
 type PickerOperation =
   "workspace.addLocal" | "project.relocate" | "clone.start";
 type DesktopOperation = Exclude<Operation, "codex.approval" | "clone.prepare">;
@@ -72,6 +81,16 @@ const commands: Record<DesktopOperation, DesktopCommand> = {
   "decision.list": "resume_request",
   "decision.get": "resume_request",
   "decision.purge": "resume_request",
+  "compiler.compile": "compiler_request",
+  "compiler.grantIssue": "compiler_request",
+  "compiler.grantList": "compiler_request",
+  "compiler.grantRevoke": "compiler_request",
+  "compiler.packageExport": "compiler_request",
+  "compiler.handoffImport": "compiler_request",
+  "compiler.mcpCall": "compiler_request",
+  "compiler.queryRun": "compiler_request",
+  "compiler.auditList": "compiler_request",
+  "compiler.auditReview": "compiler_request",
   "context.browse": "context_browse",
   "context.capture": "context_capture",
   "context.list": "context_list",
@@ -140,7 +159,8 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
         command === "codex_request" ||
           command === "task_request" ||
           command === "working_request" ||
-          command === "resume_request"
+          command === "resume_request" ||
+          command === "compiler_request"
           ? { id, request: { operation, ...args } }
           : { ...args, id },
       );
@@ -307,6 +327,33 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
           throw new DesktopError("invalid_response");
         return receipt;
       },
+    },
+    compiler: {
+      compile: (input: CompilerCompileInput) =>
+        request("compiler.compile", input),
+      grantIssue: (input: GrantIssueInput) =>
+        request("compiler.grantIssue", input),
+      grantList: (scope: IdentityScope, manifestDigest?: string) =>
+        request(
+          "compiler.grantList",
+          manifestDigest === undefined ? scope : { ...scope, manifestDigest },
+        ),
+      grantRevoke: (input: GrantRevokeInput) =>
+        request("compiler.grantRevoke", input),
+      packageExport: (input: PackageExportInput) =>
+        request("compiler.packageExport", input),
+      handoffImport: (input: HandoffImportInput) =>
+        request("compiler.handoffImport", input),
+      mcpCall: (input: McpCallInput) => request("compiler.mcpCall", input),
+      queryRun: (input: AuditedQueryRunInput) =>
+        request("compiler.queryRun", input),
+      auditList: (scope: IdentityScope, manifestDigest?: string) =>
+        request(
+          "compiler.auditList",
+          manifestDigest === undefined ? scope : { ...scope, manifestDigest },
+        ),
+      auditReview: (input: AuditReviewInput) =>
+        request("compiler.auditReview", input),
     },
     working: {
       list: (projectId: string) => request("working.list", { projectId }),
@@ -697,6 +744,21 @@ const messages: Record<ErrorCode, string> = {
   decision_purge_pending:
     "A exclusão da decisão ficou pendente e precisa ser concluída antes de reabrir o conteúdo.",
   resume_stale: "A leitura da retomada ficou obsoleta após a troca de projeto.",
+  compiler_invalid_input:
+    "A compilação ou concessão F2 contém entrada inválida ou orçamento insuficiente para itens obrigatórios.",
+  destination_unknown:
+    "Destino desconhecido; nenhuma concessão ou entrega de contexto pode ser autorizada.",
+  destination_denied:
+    "Este destino não está autorizado ou exige confinamento estrito ainda bloqueado.",
+  grant_invalid:
+    "O SessionGrant informado não corresponde ao escopo, sessão, manifesto ou operação.",
+  grant_revoked:
+    "O SessionGrant foi revogado e não autoriza mais nenhuma leitura.",
+  grant_expired: "O SessionGrant expirou; emita uma nova concessão explícita.",
+  handoff_invalid:
+    "O ContextPackage ou handoff falhou na validação de integridade ou escopo.",
+  audit_unavailable:
+    "O registro de auditoria solicitado não está disponível neste escopo.",
   context_source_unavailable:
     "A fonte preservada está indisponível ou não passou na verificação de integridade.",
 };

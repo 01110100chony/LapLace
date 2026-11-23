@@ -268,8 +268,31 @@ export function codexExecArgs(cwd: string) {
   ];
 }
 
-export function workspaceCodexExecArgs(cwd: string) {
+export function workspaceCodexExecArgs(
+  cwd: string,
+  options?: {
+    mcpGateway?: {
+      command: string;
+      args: string[];
+    };
+  },
+) {
   const args = codexExecArgs(cwd);
+  if (options?.mcpGateway) {
+    const mcpFlagIndex = args.indexOf("mcp_servers={}");
+    if (mcpFlagIndex !== -1) {
+      args.splice(
+        mcpFlagIndex - 1,
+        2,
+        "-c",
+        `mcp_servers.laplace.command=${JSON.stringify(options.mcpGateway.command)}`,
+        "-c",
+        `mcp_servers.laplace.args=${JSON.stringify(options.mcpGateway.args)}`,
+        "-c",
+        "mcp_servers.laplace.enabled=true",
+      );
+    }
+  }
   args.splice(
     args.length - 1,
     0,
@@ -459,8 +482,13 @@ export function runCodex(
   );
 }
 
-export function runWorkspaceCodex(input: CodexRunInput & { helper: string }) {
-  const { helper, installation, cwd } = input;
+export function runWorkspaceCodex(
+  input: CodexRunInput & {
+    helper: string;
+    mcpGateway?: { command: string; args: string[] };
+  },
+) {
+  const { helper, installation, cwd, mcpGateway } = input;
   return superviseCodex(input, () => {
     const child = spawn(
       helper,
@@ -468,7 +496,7 @@ export function runWorkspaceCodex(input: CodexRunInput & { helper: string }) {
         "--laplace-codex-job",
         String(process.pid),
         installation.executable,
-        ...workspaceCodexExecArgs(cwd),
+        ...workspaceCodexExecArgs(cwd, mcpGateway ? { mcpGateway } : undefined),
       ],
       { cwd, env: codexEnvironment(), windowsHide: true },
     );

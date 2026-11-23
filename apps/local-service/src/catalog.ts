@@ -33,6 +33,7 @@ import { createResultReviewStore, reviewMigration } from "./result-review.ts";
 import { createIdentityStore, identityMigration } from "./identity-store.ts";
 import { createEvidenceAdapter } from "./evidence-adapter.ts";
 import { createDecisionStore, decisionMigration } from "./decision-store.ts";
+import { createF2Store, f2Migration } from "./f2-store.ts";
 
 const migrations = [
   `CREATE TABLE projects (
@@ -64,6 +65,7 @@ const migrations = [
   reviewMigration,
   identityMigration,
   decisionMigration,
+  f2Migration,
 ];
 
 export const catalogSchemaVersion = migrations.length;
@@ -125,7 +127,7 @@ export function openCatalog(dataDir: string) {
   // and Node 24 development builds that may carry an older SQLite.
   const database = new DatabaseSync(join(dataDir, "catalog.sqlite3"), {
     enableForeignKeyConstraints: true,
-    timeout: 2_000,
+    timeout: 10_000,
   });
   const write = <T>(run: () => T) => transaction(database, run, "write");
   const read = <T>(run: () => T) => transaction(database, run, "read");
@@ -267,6 +269,7 @@ export function openCatalog(dataDir: string) {
       evidence,
     );
     decisions.reconcileTombstones();
+    const f2 = createF2Store(database, write, read, identity);
     const codexHistory = createCodexHistory(database, context);
     return {
       identity,
@@ -274,6 +277,7 @@ export function openCatalog(dataDir: string) {
       contextSearch,
       evidence,
       decisions,
+      f2,
       codexHistory,
       tasks: createTaskStore(database, write, codexHistory),
       executions: createTaskExecutionStore(
@@ -330,48 +334,48 @@ export function openCatalog(dataDir: string) {
         return read(() => {
           const snap = latestSnapshotActivity.get(legacyProjectId) as
             | {
-                contextId: string;
-                head: string | null;
-                completedAt: string;
-                status: "complete" | "partial" | "invalidated";
-                included: number;
-                omitted: number;
-              }
+              contextId: string;
+              head: string | null;
+              completedAt: string;
+              status: "complete" | "partial" | "invalidated";
+              included: number;
+              omitted: number;
+            }
             | undefined;
           const exec = latestExecutionActivity.get(legacyProjectId) as
             | {
-                taskId: string;
-                executionId: string;
-                mode: string;
-                state: string;
-                recordedAt: string;
-                reviewChoice: "approved" | "rejected" | null;
-              }
+              taskId: string;
+              executionId: string;
+              mode: string;
+              state: string;
+              recordedAt: string;
+              reviewChoice: "approved" | "rejected" | null;
+            }
             | undefined;
           return {
             lastCapture: snap
               ? {
-                  contextId: snap.contextId,
-                  projectId: logicalProjectId,
-                  head: snap.head,
-                  completedAt: snap.completedAt,
-                  status: snap.status,
-                  included: Number(snap.included),
-                  omitted: Number(snap.omitted),
-                }
+                contextId: snap.contextId,
+                projectId: logicalProjectId,
+                head: snap.head,
+                completedAt: snap.completedAt,
+                status: snap.status,
+                included: Number(snap.included),
+                omitted: Number(snap.omitted),
+              }
               : null,
             lastExecution:
               exec && exec.mode === "mock_development"
                 ? {
-                    taskId: exec.taskId,
-                    executionId: exec.executionId,
-                    projectId: logicalProjectId,
-                    mode: "mock_development",
-                    state: exec.state,
-                    recordedAt: exec.recordedAt,
-                    reviewChoice: exec.reviewChoice ?? null,
-                    isLegacyAttemptNote: true,
-                  }
+                  taskId: exec.taskId,
+                  executionId: exec.executionId,
+                  projectId: logicalProjectId,
+                  mode: "mock_development",
+                  state: exec.state,
+                  recordedAt: exec.recordedAt,
+                  reviewChoice: exec.reviewChoice ?? null,
+                  isLegacyAttemptNote: true,
+                }
                 : null,
           };
         });
