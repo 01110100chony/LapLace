@@ -3,43 +3,19 @@ import {
   getCurrentWindow,
   type Window as TauriWindow,
 } from "@tauri-apps/api/window";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type RefObject } from "react";
+import { LambdaMark, VisualIcon } from "./VisualIcon";
 
-type WorkspaceLocation = {
-  projectName: string | undefined;
-  goHome: () => void;
+type TitleBarProps = {
+  projectName?: string;
+  locationLabel: string;
+  isPreview: boolean;
+  paused: boolean;
+  onTogglePause: () => void;
+  paletteTrigger: RefObject<HTMLButtonElement | null>;
 };
 
 const appWindow = isTauri() ? getCurrentWindow() : undefined;
-
-function WorkspaceBreadcrumb({ projectName, goHome }: WorkspaceLocation) {
-  return (
-    <nav className="breadcrumb" aria-label="Localização no workspace">
-      {projectName ? (
-        <button
-          type="button"
-          className="crumb-action"
-          onClick={goHome}
-          aria-label="Área de trabalho"
-          title="Área de trabalho"
-        >
-          <span className="crumb-home-label">Área de trabalho</span>
-          <span className="crumb-back" aria-hidden="true">
-            ‹
-          </span>
-        </button>
-      ) : (
-        <span className="crumb-root">Workspace</span>
-      )}
-      <span className="breadcrumb-separator" aria-hidden="true">
-        /
-      </span>
-      <strong aria-current="page" title={projectName}>
-        {projectName ?? "Área de trabalho"}
-      </strong>
-    </nav>
-  );
-}
 
 function WindowControls({ app }: { app: TauriWindow }) {
   const [maximized, setMaximized] = useState(false);
@@ -125,7 +101,14 @@ function reportWindowError(error: unknown) {
   console.error("[laplace:window]", error);
 }
 
-export function AppTitleBar(location: WorkspaceLocation) {
+export function AppTitleBar({
+  projectName,
+  locationLabel,
+  isPreview,
+  paused,
+  onTogglePause,
+  paletteTrigger,
+}: TitleBarProps) {
   const [frameless, setFrameless] = useState(false);
 
   useEffect(() => {
@@ -150,16 +133,50 @@ export function AppTitleBar(location: WorkspaceLocation) {
           aria-hidden="true"
           data-tauri-drag-region={frameless || undefined}
         >
-          λ
+          <LambdaMark />
         </span>
-        Laplace
+        LapLace
       </div>
-      <WorkspaceBreadcrumb {...location} />
+      <div className="breadcrumb" aria-label="Localização atual">
+        {(projectName || isPreview) && (
+          <>
+            <span className="shell-context">
+              {projectName ?? "Laboratório"}
+            </span>
+            <span className="breadcrumb-separator" aria-hidden="true">
+              /
+            </span>
+          </>
+        )}
+        <strong aria-current="page" title={locationLabel}>
+          {locationLabel}
+        </strong>
+      </div>
       <div
         className="window-drag-region"
         aria-hidden="true"
         data-tauri-drag-region={frameless || undefined}
       />
+      <button
+        className="command-trigger"
+        type="button"
+        aria-label="Abrir navegação rápida"
+        aria-keyshortcuts="Control+K Meta+K"
+        ref={paletteTrigger}
+      >
+        <VisualIcon name="search" /> <span>Buscar ou executar</span>{" "}
+        <kbd>Ctrl K</kbd>
+      </button>
+      <button
+        type="button"
+        className="shell-motion"
+        aria-label="Pausar campo espectral"
+        aria-pressed={paused}
+        title={paused ? "Retomar campo espectral" : "Pausar campo espectral"}
+        onClick={onTogglePause}
+      >
+        <VisualIcon name={paused ? "play" : "pause"} />
+      </button>
       {frameless && appWindow && <WindowControls app={appWindow} />}
     </header>
   );

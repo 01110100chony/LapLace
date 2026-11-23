@@ -1,6 +1,7 @@
 import { useId, useRef, useState, type RefObject } from "react";
 import type { Project } from "@laplace/contracts";
 import { errorMessage } from "./ipc";
+import { VisualIcon } from "./VisualIcon";
 
 type Props = {
   dialogRef: RefObject<HTMLDialogElement | null>;
@@ -71,7 +72,7 @@ export function ProjectFolderDialog({
           onClick={() => dialogRef.current?.close()}
           aria-label="Fechar"
         >
-          ×
+          <VisualIcon name="close" />
         </button>
       </div>
       <p id={descriptionId}>
@@ -97,7 +98,9 @@ export function ProjectFolderDialog({
         </button>
         <button
           className="button primary"
-          autoFocus
+          ref={(button) => {
+            if (button) button.autofocus = true;
+          }}
           aria-disabled={busy || undefined}
           onClick={() => {
             if (!busy) void select();

@@ -12,6 +12,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DesktopError, errorMessage, type createDesktopClient } from "./ipc";
 import { createLatestRequest } from "./workspace";
+import { VisualIcon } from "./VisualIcon";
 
 type Client = ReturnType<typeof createDesktopClient>["context"];
 const dateFormat = new Intl.DateTimeFormat("pt-BR", {
@@ -56,7 +57,7 @@ function SourcePreview({
   useEffect(() => heading.current?.focus(), [data]);
   return (
     <section
-      className="context-result"
+      className="context-result search-preview"
       aria-labelledby="context-preview-heading"
     >
       <header className="section-heading">
@@ -276,10 +277,16 @@ export function ContextSearchView({
     (scope === "history" || !!index?.indexedAt);
 
   return (
-    <section className="panel context-search">
-      <h3 id="context-search-heading">Buscar nas capturas</h3>
+    <section
+      className="panel context-search"
+      aria-labelledby="context-search-heading"
+    >
+      <header className="work-panel-heading">
+        <h3 id="context-search-heading">Busca nas capturas</h3>
+      </header>
       <search aria-labelledby="context-search-heading">
         <form
+          className="search-controls"
           onSubmit={(event) => {
             event.preventDefault();
             if (!canSearch) return;
@@ -293,8 +300,8 @@ export function ContextSearchView({
           }}
           aria-labelledby="context-search-heading"
         >
-          <div className="context-form">
-            <label htmlFor="context-query">Termos de busca</label>
+          <label className="work-field">
+            <span>Termos de busca</span>
             <input
               id="context-query"
               type="search"
@@ -307,12 +314,9 @@ export function ContextSearchView({
               enterKeyHint="search"
               onChange={(event) => setQuery(event.target.value)}
             />
-            <button className="button primary" disabled={!canSearch}>
-              Pesquisar
-            </button>
-          </div>
-          <div className="context-form">
-            <label htmlFor="context-scope">Escopo</label>
+          </label>
+          <label className="work-field">
+            <span>Escopo</span>
             <select
               id="context-scope"
               value={scope}
@@ -327,22 +331,25 @@ export function ContextSearchView({
               </option>
               <option value="history">Histórico do projeto</option>
             </select>
-          </div>
+          </label>
+          <button className="button primary" disabled={!canSearch}>
+            <VisualIcon name="search" /> Pesquisar
+          </button>
         </form>
       </search>
-      <div className="context-toolbar">
+      <div className="context-toolbar index-status">
         <p className="observed" role="status">
-          {indexLabel}
-          {index && (
-            <>
-              {" "}
-              ·{" "}
-              <code title={index.contextId}>
-                {index.contextId.slice(0, 12)}
-              </code>
-            </>
-          )}
-          {" · "}
+          <span className="index-label">
+            {indexLabel}
+            {index && (
+              <>
+                {" · "}
+                <code title={index.contextId}>
+                  {index.contextId.slice(0, 12)}
+                </code>
+              </>
+            )}
+          </span>{" "}
           {indexMessage}
         </p>
         {index?.eligible && (
@@ -393,7 +400,7 @@ export function ContextSearchView({
           {Array.from(groups, ([key, hits]) => {
             const first = hits[0]!;
             return (
-              <li key={key}>
+              <li key={key} className="search-results-row">
                 <h4>
                   <code>{first.path}</code>
                 </h4>

@@ -15,6 +15,8 @@ import { createLatestRequest } from "./workspace";
 import { CodexQueryView } from "./CodexQueryView";
 import { ContextSearchView } from "./ContextSearchView";
 import { omissionLabels } from "./contextLabels";
+import { EmptyState, WorkDisclosure, WorkHeading } from "./WorkView";
+import { VisualIcon } from "./VisualIcon";
 
 type Client = ReturnType<typeof createDesktopClient>["context"];
 type Load<T> =
@@ -45,14 +47,18 @@ function ContextTime({ value }: { value: string }) {
 function SnapshotDetail({
   snapshot,
   validate,
+  focusHeading,
+  checking,
 }: {
   snapshot: ContextSnapshot;
+  focusHeading: boolean;
+  checking: boolean;
   validate: () => void;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
-    heading.current?.focus();
-  }, [snapshot.contextId]);
+    if (focusHeading) heading.current?.focus();
+  }, [focusHeading, snapshot.contextId]);
 
   return (
     <>
@@ -61,7 +67,7 @@ function SnapshotDetail({
           Captura {statuses[snapshot.status].toLowerCase()}
         </h3>
         {snapshot.status !== "invalidated" && (
-          <button className="button" onClick={validate}>
+          <button className="button" disabled={checking} onClick={validate}>
             Comparar com estado atual
           </button>
         )}
@@ -114,12 +120,14 @@ export function ContextView({
   client,
   codex,
   onCreateTask,
+  openMemory,
 }: {
   projectId: string;
   projectName: string;
   client: Client;
   codex: ReturnType<typeof createDesktopClient>["codex"];
   onCreateTask: (source: TaskSource, question: string) => void;
+  openMemory: () => void;
 }) {
   const [browse, setBrowse] = useState<Load<ContextBrowse>>({
     state: "loading",
@@ -135,6 +143,11 @@ export function ContextView({
   const [excerpts, setExcerpts] = useState<ContextSourcePreview[]>([]);
   const [busy, setBusy] = useState(false);
   const [detailBusy, setDetailBusy] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const [focusCapture, setFocusCapture] = useState(true);
+  const [providerActivated, setProviderActivated] = useState(false);
+  const sourcesPanel = useRef<HTMLDetailsElement>(null);
+  const providerPanel = useRef<HTMLDetailsElement>(null);
   const [message, setMessage] = useState("");
   const [problem, setProblem] = useState("");
   const [requests] = useState(() => ({
@@ -192,6 +205,7 @@ export function ContextView({
     if (!selected.length || busy) return;
     requests.detail.invalidate();
     requests.validation.invalidate();
+    setValidating(false);
     setDetailBusy(false);
     setBusy(true);
     setProblem("");
@@ -200,6 +214,7 @@ export function ContextView({
       () => client.capture(projectId, selected),
       (data) => {
         setBusy(false);
+        setFocusCapture(true);
         setSnapshot(data);
         setExcerpts([]);
         readHistory();
@@ -213,12 +228,14 @@ export function ContextView({
 
   function open(contextId: string, excerpt?: ContextSourcePreview) {
     requests.validation.invalidate();
+    setValidating(false);
     setMessage("");
     setProblem("");
     setDetailBusy(true);
     void requests.detail.run(
       () => client.get(projectId, contextId),
       (data) => {
+        setFocusCapture(!excerpt);
         setSnapshot(data);
         setExcerpts((old) =>
           excerpt
@@ -234,6 +251,7 @@ export function ContextView({
             : [],
         );
         setDetailBusy(false);
+        if (excerpt) openDisclosure(providerPanel.current);
       },
       (error) => {
         setProblem(errorMessage(error));
@@ -243,12 +261,14 @@ export function ContextView({
   }
 
   function validate() {
-    if (!snapshot || busy || detailBusy) return;
+    if (!snapshot || busy || detailBusy || validating) return;
+    setValidating(true);
     setMessage("Comparando com o estado atual…");
     setProblem("");
     void requests.validation.run(
       () => client.validate(projectId, snapshot.contextId),
       (result) => {
+        setValidating(false);
         const states = {
           matches: "A seleção e o estado Git correspondem à captura.",
           differs: "A seleção ou o estado Git difere da captura histórica.",
@@ -260,318 +280,402 @@ export function ContextView({
         );
       },
       (error) => {
+        setValidating(false);
         setMessage("");
         setProblem(errorMessage(error));
       },
     );
   }
 
+  function openDisclosure(disclosure: HTMLDetailsElement | null) {
+    if (!disclosure) return;
+    disclosure.open = true;
+    disclosure.querySelector("summary")?.focus();
+  }
+
   return (
-    <section aria-labelledby="context-heading">
-      <h2 id="context-heading">Contexto</h2>
-      <ContextSearchView
-        key={`${projectId}/${snapshot?.contextId ?? ""}`}
-        projectId={projectId}
-        client={client}
-        selected={snapshot}
-        onOfferExcerpt={(excerpt) => open(excerpt.contextId, excerpt)}
-      />
-      <CodexQueryView
-        key={`${projectId}/${snapshot?.contextId ?? ""}`}
-        projectId={projectId}
-        projectName={projectName}
-        client={codex}
-        onCreateTask={onCreateTask}
-        snapshot={snapshot}
-        excerpts={excerpts}
-      />
-      <div className="context-grid">
-        <section className="panel" aria-labelledby="context-sources">
-          <h3 id="context-sources">Fontes da árvore de trabalho</h3>
-          <div className="context-toolbar">
-            {folder && (
-              <button
-                className="button"
-                onClick={() =>
-                  readFolder(folder.split("/").slice(0, -1).join("/"))
-                }
-              >
-                Pasta acima
-              </button>
-            )}
-            <code>{folder || "/"}</code>
-          </div>
-          <form
-            className="context-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              readFolder(folder, prefix);
-            }}
-          >
-            <label htmlFor="context-prefix">Filtrar por início do nome</label>
-            <input
-              id="context-prefix"
-              value={prefix}
-              maxLength={128}
-              onChange={(event) => setPrefix(event.target.value)}
-            />
-            <button className="button">Filtrar</button>
-          </form>
-          {browse.state === "loading" && (
-            <p role="status" className="empty">
-              Carregando fontes…
-            </p>
-          )}
-          {browse.state === "error" && (
-            <p className="service-error" role="alert">
-              {browse.message}{" "}
-              <button
-                className="text-button"
-                onClick={() => readFolder(folder, prefix)}
-              >
-                Tentar novamente
-              </button>
-            </p>
-          )}
-          {browse.state === "ready" && (
-            <fieldset className="context-files">
-              <legend>Arquivos e pastas desta pasta</legend>
-              {browse.data.items.length === 0 && (
-                <p className="empty">Nenhuma fonte disponível.</p>
-              )}
-              {browse.data.items.map(({ path, kind }) =>
-                kind === "folder" ? (
-                  <button
-                    className="text-button context-file"
-                    key={path}
-                    onClick={() => readFolder(path)}
-                  >
-                    {path.split("/").at(-1)}/
-                  </button>
-                ) : (
-                  <label className="context-file" key={path}>
-                    <input
-                      type="checkbox"
-                      checked={selected.includes(path)}
-                      disabled={
-                        busy ||
-                        (selected.length >= maxContextFiles &&
-                          !selected.includes(path))
-                      }
-                      onChange={() => toggle(path)}
-                    />
-                    <span>{path.split("/").at(-1)}</span>
-                  </label>
-                ),
-              )}
-              {browse.data.limited && (
-                <p className="empty">
-                  Limite da listagem atingido. Filtre por nome ou informe o
-                  caminho.
-                </p>
-              )}
-            </fieldset>
-          )}
-          <form
-            className="context-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (
-                isContextPath(manual) &&
-                !selected.includes(manual) &&
-                selected.length < maxContextFiles
-              ) {
-                toggle(manual);
-                setManual("");
-              }
-            }}
-          >
-            <label htmlFor="context-manual">Caminho relativo (use /)</label>
-            <input
-              id="context-manual"
-              value={manual}
-              maxLength={384}
-              onChange={(event) => setManual(event.target.value)}
-            />
-            <button
-              className="button"
-              disabled={
-                busy ||
-                !isContextPath(manual) ||
-                selected.includes(manual) ||
-                selected.length >= maxContextFiles
-              }
-            >
-              Selecionar
-            </button>
-          </form>
-          <details className="context-selection">
-            <summary>
-              {selected.length} de {maxContextFiles} arquivos selecionados
-            </summary>
-            {selected.length > 0 && (
-              <ul className="context-list">
-                {selected.map((path) => (
-                  <li className="context-toolbar" key={path}>
-                    <code>{path}</code>
-                    <button
-                      className="text-button"
-                      aria-label={`Remover ${path}`}
-                      disabled={busy}
-                      onClick={() => toggle(path)}
-                    >
-                      Remover
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </details>
+    <section
+      className="investigation-surface"
+      aria-labelledby="context-heading"
+    >
+      <WorkHeading
+        id="context-heading"
+        title="Contexto"
+        description="Pesquise nas capturas e confira a origem das evidências."
+        actions={
           <button
-            className="button primary"
-            disabled={busy || !selected.length}
-            onClick={capture}
+            className="button"
+            aria-controls="context-source-picker"
+            onClick={() => openDisclosure(sourcesPanel.current)}
           >
-            Capturar contexto
+            <VisualIcon name="folder" /> Selecionar fontes
           </button>
-          {busy && (
-            <p className="empty" role="status">
-              Capturando e verificando os arquivos…
-            </p>
-          )}
-        </section>
-        <section className="panel" aria-labelledby="context-history">
-          <h3 id="context-history">Histórico de capturas</h3>
-          {history.state === "loading" && (
-            <p className="empty" role="status">
-              Carregando histórico…
-            </p>
-          )}
-          {history.state === "error" && (
-            <p className="service-error" role="alert">
-              {history.message}{" "}
-              <button className="text-button" onClick={() => readHistory()}>
-                Tentar novamente
-              </button>
-            </p>
-          )}
-          {history.state === "ready" && (
-            <>
-              {history.data.items.length ? (
-                <ul className="context-list">
-                  {history.data.items.map((item) => (
-                    <li key={item.contextId}>
-                      <button
-                        className="context-history-row"
-                        disabled={busy}
-                        aria-current={
-                          snapshot?.contextId === item.contextId || undefined
-                        }
-                        onClick={() => open(item.contextId)}
-                      >
-                        <span>
-                          <ContextTime value={item.completedAt} /> ·{" "}
-                          {statuses[item.status]}
-                        </span>
-                        <small>
-                          {item.head ? (
-                            <code>{item.head.slice(0, 12)}</code>
-                          ) : (
-                            "Sem commits"
-                          )}{" "}
-                          · {item.included} fontes
-                        </small>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="empty">Nenhuma captura salva neste projeto.</p>
-              )}
-              <div className="context-toolbar">
-                <button className="text-button" onClick={() => readHistory()}>
-                  Mais recentes
-                </button>
-                {history.data.nextBefore && (
-                  <button
-                    className="text-button"
-                    onClick={() => readHistory(history.data.nextBefore)}
-                  >
-                    Mais antigas
-                  </button>
-                )}
-              </div>
-            </>
-          )}
-          {detailBusy && (
-            <p className="empty" role="status">
-              Abrindo captura…
-            </p>
-          )}
-        </section>
-      </div>
+        }
+      />
       {problem && (
         <p className="error-banner" role="alert">
           {problem}
         </p>
       )}
-      {snapshot && (
-        <section
-          className="panel context-result"
-          aria-labelledby="context-result"
+      <div className="work-grid investigation-grid">
+        <div className="work-stack investigation-sheet">
+          <ContextSearchView
+            key={`${projectId}/${snapshot?.contextId ?? ""}`}
+            projectId={projectId}
+            client={client}
+            selected={snapshot}
+            onOfferExcerpt={(excerpt) => open(excerpt.contextId, excerpt)}
+          />
+        </div>
+        <aside
+          className="work-stack investigation-inspector"
+          aria-label="Fontes e proveniência"
         >
-          <SnapshotDetail snapshot={snapshot} validate={validate} />
-          {message && (
-            <p className="observed" role="status">
-              {message}
-            </p>
-          )}
-          <h4>
-            {snapshot.included} incluídos · {snapshot.omitted} omitidos
-          </h4>
-          <ul className="context-list context-entries">
-            {snapshot.entries.map((entry) => (
-              <li key={entry.path}>
-                <strong>
-                  <code>
-                    {entry.outcome === "included"
-                      ? entry.canonicalPath
-                      : entry.path}
-                  </code>
-                </strong>
-                {entry.outcome === "omitted" ? (
-                  <p>Omitido · {omissionLabels[entry.reason]}</p>
-                ) : (
-                  <>
-                    <p>
-                      Árvore de trabalho ·{" "}
-                      {entry.index.length
-                        ? "Rastreado no índice"
-                        : "Sem entrada no índice"}{" "}
-                      · {entry.size} B
-                    </p>
-                    <p>
-                      SHA-256 <code>{entry.sha256}</code>
-                    </p>
-                    {entry.index.length > 0 && (
-                      <details>
-                        <summary>Versões no índice</summary>
-                        <ul className="context-list">
-                          {entry.index.map((stage) => (
-                            <li key={stage.stage}>
-                              Estágio {stage.stage} · <code>{stage.oid}</code>
-                            </li>
-                          ))}
-                        </ul>
-                      </details>
+          {snapshot && (
+            <section
+              className="panel context-result"
+              aria-labelledby="context-result"
+            >
+              <SnapshotDetail
+                snapshot={snapshot}
+                validate={validate}
+                focusHeading={focusCapture}
+                checking={busy || detailBusy || validating}
+              />
+              {message && (
+                <p className="observed" role="status">
+                  {message}
+                </p>
+              )}
+              <h4>
+                {snapshot.included} incluídos · {snapshot.omitted} omitidos
+              </h4>
+              <ul className="context-list context-entries">
+                {snapshot.entries.map((entry) => (
+                  <li key={entry.path}>
+                    <strong>
+                      <code>
+                        {entry.outcome === "included"
+                          ? entry.canonicalPath
+                          : entry.path}
+                      </code>
+                    </strong>
+                    {entry.outcome === "omitted" ? (
+                      <p>Omitido · {omissionLabels[entry.reason]}</p>
+                    ) : (
+                      <>
+                        <p>
+                          Árvore de trabalho ·{" "}
+                          {entry.index.length
+                            ? "Rastreado no índice"
+                            : "Sem entrada no índice"}{" "}
+                          · {entry.size} B
+                        </p>
+                        <p>
+                          SHA-256 <code>{entry.sha256}</code>
+                        </p>
+                        {entry.index.length > 0 && (
+                          <details>
+                            <summary>Versões no índice</summary>
+                            <ul className="context-list">
+                              {entry.index.map((stage) => (
+                                <li key={stage.stage}>
+                                  Estágio {stage.stage} ·{" "}
+                                  <code>{stage.oid}</code>
+                                </li>
+                              ))}
+                            </ul>
+                          </details>
+                        )}
+                      </>
                     )}
-                  </>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          <section
+            className="panel capture-history"
+            aria-labelledby="context-history"
+          >
+            <header className="work-panel-heading">
+              <h3 id="context-history">Capturas</h3>
+            </header>
+            {history.state === "loading" && (
+              <p className="work-message" role="status">
+                Carregando histórico…
+              </p>
+            )}
+            {history.state === "error" && (
+              <p className="work-message" role="alert">
+                {history.message}{" "}
+                <button className="text-button" onClick={() => readHistory()}>
+                  Tentar novamente
+                </button>
+              </p>
+            )}
+            {history.state === "ready" && (
+              <>
+                {history.data.items.length ? (
+                  <ul className="work-list">
+                    {history.data.items.map((item) => (
+                      <li key={item.contextId}>
+                        <button
+                          className="work-list-row"
+                          disabled={busy}
+                          aria-current={
+                            snapshot?.contextId === item.contextId || undefined
+                          }
+                          onClick={() => open(item.contextId)}
+                        >
+                          <VisualIcon name="archive" />
+                          <span className="work-row-copy">
+                            <strong>
+                              {statuses[item.status]} · {item.included} fontes
+                            </strong>
+                            <small>
+                              <ContextTime value={item.completedAt} /> ·{" "}
+                              {item.head ? (
+                                <code title={item.head}>
+                                  {item.head.slice(0, 12)}
+                                </code>
+                              ) : (
+                                "Sem commits"
+                              )}
+                            </small>
+                          </span>
+                          <VisualIcon name="chevron" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <EmptyState icon="archive" title="Nenhuma captura salva">
+                    Selecione fontes para preservar uma primeira leitura.
+                  </EmptyState>
                 )}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+                <div className="context-toolbar">
+                  <button className="text-button" onClick={() => readHistory()}>
+                    Atualizar histórico
+                  </button>
+                  {history.data.nextBefore && (
+                    <button
+                      className="text-button"
+                      onClick={() => readHistory(history.data.nextBefore)}
+                    >
+                      Mais antigas
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+            {detailBusy && (
+              <p className="work-message" role="status">
+                Abrindo captura…
+              </p>
+            )}
+          </section>
+          <WorkDisclosure
+            ref={sourcesPanel}
+            id="context-source-picker"
+            icon="folder"
+            title="Fontes da árvore de trabalho"
+            detail={
+              selected.length
+                ? `${selected.length} arquivos selecionados`
+                : undefined
+            }
+          >
+            <div className="source-picker">
+              <div className="source-directory">
+                {folder && (
+                  <button
+                    className="button"
+                    onClick={() =>
+                      readFolder(folder.split("/").slice(0, -1).join("/"))
+                    }
+                  >
+                    <VisualIcon name="back" /> Pasta acima
+                  </button>
+                )}
+                <code>{folder || "/"}</code>
+              </div>
+              <form
+                className="context-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  readFolder(folder, prefix);
+                }}
+              >
+                <label htmlFor="context-prefix">
+                  Filtrar por início do nome
+                </label>
+                <input
+                  id="context-prefix"
+                  value={prefix}
+                  maxLength={128}
+                  onChange={(event) => setPrefix(event.target.value)}
+                />
+                <button className="button">Filtrar</button>
+              </form>
+              {browse.state === "loading" && (
+                <p role="status" className="empty">
+                  Carregando fontes…
+                </p>
+              )}
+              {browse.state === "error" && (
+                <p className="service-error" role="alert">
+                  {browse.message}{" "}
+                  <button
+                    className="text-button"
+                    onClick={() => readFolder(folder, prefix)}
+                  >
+                    Tentar novamente
+                  </button>
+                </p>
+              )}
+              {browse.state === "ready" && (
+                <fieldset className="context-files">
+                  <legend>Arquivos e pastas desta pasta</legend>
+                  {browse.data.items.length === 0 && (
+                    <p className="empty">Nenhuma fonte disponível.</p>
+                  )}
+                  {browse.data.items.map(({ path, kind }) =>
+                    kind === "folder" ? (
+                      <button
+                        className="text-button context-file"
+                        key={path}
+                        onClick={() => readFolder(path)}
+                      >
+                        <VisualIcon name="folder" />
+                        {path.split("/").at(-1)}/
+                      </button>
+                    ) : (
+                      <label className="context-file" key={path}>
+                        <input
+                          type="checkbox"
+                          checked={selected.includes(path)}
+                          disabled={
+                            busy ||
+                            (selected.length >= maxContextFiles &&
+                              !selected.includes(path))
+                          }
+                          onChange={() => toggle(path)}
+                        />
+                        <span>{path.split("/").at(-1)}</span>
+                      </label>
+                    ),
+                  )}
+                  {browse.data.limited && (
+                    <p className="empty">
+                      Limite da listagem atingido. Filtre por nome ou informe o
+                      caminho.
+                    </p>
+                  )}
+                </fieldset>
+              )}
+              <div className="source-tools">
+                <details>
+                  <summary>Adicionar pelo caminho</summary>
+                  <form
+                    className="context-form"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      if (
+                        isContextPath(manual) &&
+                        !selected.includes(manual) &&
+                        selected.length < maxContextFiles
+                      ) {
+                        toggle(manual);
+                        setManual("");
+                      }
+                    }}
+                  >
+                    <label htmlFor="context-manual">
+                      Caminho relativo (use /)
+                    </label>
+                    <input
+                      id="context-manual"
+                      value={manual}
+                      maxLength={384}
+                      onChange={(event) => setManual(event.target.value)}
+                    />
+                    <button
+                      className="button"
+                      disabled={
+                        busy ||
+                        !isContextPath(manual) ||
+                        selected.includes(manual) ||
+                        selected.length >= maxContextFiles
+                      }
+                    >
+                      Selecionar
+                    </button>
+                  </form>
+                </details>
+                <details className="context-selection">
+                  <summary>
+                    {selected.length} de {maxContextFiles} arquivos selecionados
+                  </summary>
+                  {selected.length > 0 && (
+                    <ul className="context-list">
+                      {selected.map((path) => (
+                        <li className="context-toolbar" key={path}>
+                          <code>{path}</code>
+                          <button
+                            className="text-button"
+                            aria-label={`Remover ${path}`}
+                            disabled={busy}
+                            onClick={() => toggle(path)}
+                          >
+                            Remover
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </details>
+              </div>
+              <button
+                className="button primary"
+                disabled={busy || !selected.length}
+                onClick={capture}
+              >
+                <VisualIcon name="archive" /> Capturar contexto
+              </button>
+              {busy && (
+                <p className="empty" role="status">
+                  Capturando e verificando os arquivos…
+                </p>
+              )}
+            </div>
+          </WorkDisclosure>
+          <WorkDisclosure
+            ref={providerPanel}
+            icon="search"
+            title="Consulta com Codex"
+            detail="Verificar provedor e revisar fontes"
+            onOpen={() => setProviderActivated(true)}
+          >
+            {providerActivated && (
+              <CodexQueryView
+                key={`${projectId}/${snapshot?.contextId ?? ""}`}
+                projectId={projectId}
+                projectName={projectName}
+                client={codex}
+                onCreateTask={onCreateTask}
+                snapshot={snapshot}
+                excerpts={excerpts}
+              />
+            )}
+          </WorkDisclosure>
+          <button type="button" className="desk-link" onClick={openMemory}>
+            <VisualIcon name="archive" /> Memória · prévia{" "}
+            <VisualIcon name="chevron" />
+          </button>
+        </aside>
+      </div>
     </section>
   );
 }

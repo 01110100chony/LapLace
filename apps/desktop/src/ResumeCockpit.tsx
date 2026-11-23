@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type {
   BindingVerificationState,
   ContextSnapshot,
@@ -18,6 +18,8 @@ import type {
 import { TextComparison } from "./TextComparison";
 import { errorMessage, type createDesktopClient } from "./ipc";
 import { createLatestRequest } from "./workspace";
+import { EmptyState } from "./WorkView";
+import { VisualIcon } from "./VisualIcon";
 
 const timeFormat = new Intl.DateTimeFormat("pt-BR", {
   dateStyle: "short",
@@ -113,6 +115,7 @@ function makeRequestId(prefix: string) {
 }
 
 export function ResumeCockpit({
+  navigation,
   project,
   fallbackSummary,
   identity,
@@ -123,7 +126,9 @@ export function ResumeCockpit({
   contextClient,
   decisionClient,
   onResumeUpdated,
+  onViewChanges,
 }: {
+  navigation: ReactNode;
   project: ProjectRecord;
   fallbackSummary: GitObservation | undefined;
   identity: ProjectIdentityResult | null;
@@ -134,6 +139,7 @@ export function ResumeCockpit({
   contextClient: ReturnType<typeof createDesktopClient>["context"];
   decisionClient: ReturnType<typeof createDesktopClient>["decisions"];
   onResumeUpdated: () => void;
+  onViewChanges: () => void;
 }) {
   const [actionLatest] = useState(() => createLatestRequest());
   const [sourcesLatest] = useState(() => createLatestRequest());
@@ -470,50 +476,46 @@ export function ResumeCockpit({
       : null;
 
   return (
-    <div className="cockpit-stack">
-      <div className="cockpit-header-meta">
-        {verification ? (
-          <span className={`badge ${verification}`}>
-            {verificationLabels[verification]}
-          </span>
-        ) : (
-          <span className="badge">Verificando vínculo…</span>
-        )}
-        {resume && resume.projectName !== project.name && (
-          <span className="badge">Projeto lógico: {resume.projectName}</span>
-        )}
-        {identity && identity.worktrees.length > 1 && (
-          <span className="badge">
-            {identity.worktrees.length} worktrees no repositório
-          </span>
-        )}
-        {currentObs?.state === "fresh" && (
-          <span className="badge fresh">Leitura atual do Git</span>
-        )}
-        {currentObs?.state === "cached" && (
-          <span className="badge cached">Cache datado</span>
-        )}
-        {currentObs?.state === "unavailable" && (
-          <span className="badge unavailable">Git indisponível</span>
-        )}
-        {verification === "unverified_legacy" && (
-          <button
-            className="text-button"
-            disabled={busyAction !== null}
-            onClick={handleConfirmIdentity}
-          >
-            Confirmar vínculo do checkout
-          </button>
-        )}
-        {(verification === "unavailable" ||
-          verification === "divergent" ||
-          verification === "ambiguous" ||
-          currentObs?.state === "cached" ||
-          currentObs?.state === "unavailable") && (
-          <button className="text-button" onClick={relocate}>
-            Relocalizar pasta
-          </button>
-        )}
+    <div className="resume-surface">
+      <div className="cockpit-strip">
+        {navigation}
+        <div className="cockpit-header-meta resume-binding">
+          {verification ? (
+            <span className={`badge ${verification}`}>
+              {verificationLabels[verification]}
+            </span>
+          ) : (
+            <span className="badge">
+              {loading ? "Verificando vínculo…" : "Vínculo indisponível"}
+            </span>
+          )}
+          {resume && resume.projectName !== project.name && (
+            <span className="badge">Projeto lógico: {resume.projectName}</span>
+          )}
+          {identity && identity.worktrees.length > 1 && (
+            <span className="badge">
+              {identity.worktrees.length} worktrees no repositório
+            </span>
+          )}
+          {verification === "unverified_legacy" && (
+            <button
+              className="text-button"
+              disabled={busyAction !== null}
+              onClick={handleConfirmIdentity}
+            >
+              Confirmar vínculo do checkout
+            </button>
+          )}
+          {(verification === "unavailable" ||
+            verification === "divergent" ||
+            verification === "ambiguous" ||
+            currentObs?.state === "cached" ||
+            currentObs?.state === "unavailable") && (
+            <button className="text-button" onClick={relocate}>
+              Relocalizar pasta
+            </button>
+          )}
+        </div>
       </div>
 
       {verification === "ambiguous" &&
@@ -560,12 +562,510 @@ export function ResumeCockpit({
         </section>
       )}
 
-      <div className="project-grid">
-        <section className="panel" aria-labelledby="repo-heading">
-          <h2 id="repo-heading">Repositório Git</h2>
-          {displayGit ? (
+      <section
+        className="resume-directive"
+        aria-labelledby="next-action-heading"
+      >
+        <div className="directive-label">
+          <h2 id="next-action-heading">Próxima ação</h2>
+          <span className="badge advisory">Sugestão</span>
+        </div>
+        {resume ? (
+          <>
+            <h3>{resume.nextAction.label}</h3>
+            <p className="next-action-rationale">
+              {resume.nextAction.rationale}
+            </p>
+            {resume.nextAction.blockedByConflict && (
+              <p className="badge warning">
+                Sugestão dependente suspensa por conflito material
+              </p>
+            )}
+            {resume.memory.conflicts.length > 0 && (
+              <ul className="cockpit-conflicts">
+                {resume.memory.conflicts.map(
+                  (conflict: ResumeConflict, idx: number) => (
+                    <li
+                      key={`${conflict.kind}-${idx}`}
+                      className={`cockpit-conflict-item ${conflict.blocking ? "blocking" : ""}`}
+                    >
+                      <strong>
+                        {conflictLabels[conflict.kind] ?? conflict.kind}
+                      </strong>
+                      : {conflict.summary}
+                    </li>
+                  ),
+                )}
+              </ul>
+            )}
+          </>
+        ) : (
+          <p className="work-message" role="status">
+            {loading
+              ? "Compondo retomada…"
+              : "Retomada indisponível para este checkout."}
+          </p>
+        )}
+      </section>
+
+      <div
+        className={
+          resume ? "checkout-ledger" : "checkout-ledger without-decision"
+        }
+      >
+        {resume && (
+          <section
+            className="ledger-region decision-sheet"
+            aria-labelledby="decision-heading"
+          >
+            <div className="work-panel-heading">
+              <h2 id="decision-heading">Decisão vigente</h2>
+              <button
+                className="button"
+                onClick={() => openForm(activeDecision)}
+              >
+                {activeDecision ? "Nova revisão" : "Registrar decisão"}
+              </button>
+            </div>
+
+            {!activeDecision ? (
+              <EmptyState icon="file" title="Nenhuma decisão vigente">
+                Registre uma decisão local e, se houver, vincule uma fonte
+                preservada.
+              </EmptyState>
+            ) : (
+              <div className="cockpit-stack decision-details">
+                <div className="cockpit-badges">
+                  <span className="badge">
+                    Revisão #{activeDecision.revision}
+                  </span>
+                  <span
+                    className={`badge ${activeDecision.visibility === "canonical_verified" ? "verified" : ""}`}
+                  >
+                    {activeDecision.visibility === "canonical_verified"
+                      ? "Canônica verificada"
+                      : "Local"}
+                  </span>
+                  <span
+                    className={`badge ${activeDecision.evidence.state === "verified" ? "verified" : "warning"}`}
+                  >
+                    {activeDecision.evidence.state === "verified"
+                      ? "Evidência verificada"
+                      : (evidenceGapBadges[activeDecision.evidence.gap] ??
+                        `Lacuna (${activeDecision.evidence.gap})`)}
+                  </span>
+                </div>
+
+                <blockquote className="cockpit-decision-body">
+                  {activeDecision.content}
+                </blockquote>
+
+                <p className="observed">
+                  Autor: <strong>{activeDecision.author}</strong> · Autoridade:{" "}
+                  {activeDecision.authority === "human_promoted"
+                    ? "promoção humana"
+                    : "registro humano local"}{" "}
+                  · Vigência: {formatTimestamp(activeDecision.effectiveAt)} ·
+                  Registro: {formatTimestamp(activeDecision.recordedAt)}
+                </p>
+
+                {activeDecision.evidence.ref && (
+                  <p className="observed">
+                    Fonte vinculada:{" "}
+                    <code>{activeDecision.evidence.ref.path}</code> · captura{" "}
+                    <code>
+                      {activeDecision.evidence.ref.contextId.slice(0, 12)}
+                    </code>{" "}
+                    · SHA-256{" "}
+                    <code>
+                      {activeDecision.evidence.ref.sha256.slice(0, 12)}
+                    </code>{" "}
+                    · cobertura:{" "}
+                    {coverageLabels[activeDecision.evidence.coverage] ??
+                      activeDecision.evidence.coverage}
+                  </p>
+                )}
+
+                {activeDecision.evidence.state === "gap" && (
+                  <p className="observed">
+                    {evidenceGapLabels[activeDecision.evidence.gap] ??
+                      activeDecision.evidence.gap}
+                  </p>
+                )}
+
+                <div className="cockpit-actions">
+                  <button
+                    className="button primary"
+                    disabled={
+                      !activeDecision.evidence.ref || busyAction !== null
+                    }
+                    onClick={() => openPreview(activeDecision)}
+                  >
+                    Abrir prova histórica
+                  </button>
+                  <button
+                    className="button"
+                    disabled={
+                      !activeDecision.evidence.ref || busyAction !== null
+                    }
+                    onClick={() => openCompare(activeDecision)}
+                  >
+                    Comparar com o presente
+                  </button>
+                  {activeDecision.revision > 1 && (
+                    <button
+                      className="button"
+                      disabled={busyAction !== null}
+                      onClick={() => openHistory(activeDecision)}
+                    >
+                      {showingHistory
+                        ? "Ocultar histórico"
+                        : `Histórico (${activeDecision.revision} revisões)`}
+                    </button>
+                  )}
+                </div>
+                <details className="decision-maintenance">
+                  <summary>Manutenção da decisão</summary>
+                  <button
+                    className="text-button decision-danger"
+                    disabled={busyAction !== null}
+                    onClick={() => {
+                      setPurgeTarget(activeDecision);
+                      setPurgeConfirmed(false);
+                      setFormOpen(false);
+                      setActionError(null);
+                    }}
+                  >
+                    Excluir decisão (expurgo F1)
+                  </button>
+                </details>
+
+                {showingHistory && (
+                  <div className="cockpit-evidence-box">
+                    <strong>
+                      Histórico de revisões ({showingHistory.revisions.length})
+                    </strong>
+                    <ul className="cockpit-conflicts">
+                      {showingHistory.revisions.map((rev) => (
+                        <li
+                          key={rev.revisionId}
+                          className="cockpit-conflict-item"
+                        >
+                          <strong>Revisão #{rev.revision}</strong> (
+                          {rev.status === "active" ? "vigente" : "substituída"}{" "}
+                          ·{" "}
+                          {rev.visibility === "canonical_verified"
+                            ? "canônica verificada"
+                            : "local"}
+                          ) · {rev.author} · {formatTimestamp(rev.recordedAt)}
+                          <div>{rev.content}</div>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {showingEvidence && (
+                  <div className="cockpit-evidence-box">
+                    <strong>
+                      Prova histórica preservada (
+                      {showingEvidence.evidence.state === "verified"
+                        ? showingEvidence.evidence.sourceOrigin ===
+                          "context_search"
+                          ? "índice C02"
+                          : "captura C01"
+                        : (evidenceGapBadges[showingEvidence.evidence.gap] ??
+                          `lacuna: ${showingEvidence.evidence.gap}`)}
+                      )
+                    </strong>
+                    {showingEvidence.evidence.ref && (
+                      <p className="observed">
+                        Caminho:{" "}
+                        <code>{showingEvidence.evidence.ref.path}</code>
+                        {showingEvidence.excerpt && (
+                          <>
+                            {" "}
+                            ·{" "}
+                            {formatLineRange(
+                              showingEvidence.excerpt.firstLine,
+                              showingEvidence.excerpt.lastLine,
+                            )}
+                          </>
+                        )}{" "}
+                        · SHA-256{" "}
+                        <code>
+                          {showingEvidence.evidence.ref.sha256.slice(0, 12)}
+                        </code>{" "}
+                        · Cobertura:{" "}
+                        {coverageLabels[showingEvidence.evidence.coverage] ??
+                          showingEvidence.evidence.coverage}
+                        {showingEvidence.evidence.capturedAt && (
+                          <>
+                            {" "}
+                            · Capturada em{" "}
+                            {formatTimestamp(
+                              showingEvidence.evidence.capturedAt,
+                            )}
+                          </>
+                        )}
+                      </p>
+                    )}
+                    {showingEvidence.excerpt ? (
+                      <pre className="cockpit-excerpt">
+                        {showingEvidence.excerpt.text}
+                      </pre>
+                    ) : (
+                      <p>
+                        Sem trecho disponível devido a{" "}
+                        {showingEvidence.evidence.state === "gap"
+                          ? (evidenceGapLabels[showingEvidence.evidence.gap] ??
+                            showingEvidence.evidence.gap)
+                          : "lacuna"}
+                        .
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {showingCompare && (
+                  <div className="cockpit-evidence-box">
+                    <strong>
+                      Comparação histórico × presente:{" "}
+                      {comparisonLabels[showingCompare.comparison] ??
+                        showingCompare.comparison}
+                    </strong>
+                    <p className="observed">
+                      Passado:{" "}
+                      {showingCompare.historical.evidence.capturedAt
+                        ? formatTimestamp(
+                            showingCompare.historical.evidence.capturedAt,
+                          )
+                        : "indisponível"}
+                      {showingCompare.historical.excerpt && (
+                        <>
+                          {" "}
+                          (
+                          {formatLineRange(
+                            showingCompare.historical.excerpt.firstLine,
+                            showingCompare.historical.excerpt.lastLine,
+                          )}
+                          )
+                        </>
+                      )}{" "}
+                      · Presente:{" "}
+                      {formatTimestamp(showingCompare.present.checkedAt)} (
+                      {presentStateLabels[showingCompare.present.state] ??
+                        showingCompare.present.state}
+                      )
+                    </p>
+                    {showingCompare.present.state === "available" &&
+                    showingCompare.historical.excerpt ? (
+                      <>
+                        {showingCompare.comparison === "differs" &&
+                          showingCompare.historical.excerpt.text ===
+                            showingCompare.present.text && (
+                            <p className="observed">
+                              O arquivo completo no working tree difere da
+                              captura histórica (SHA-256 distinto), embora o
+                              trecho vinculado (
+                              {formatLineRange(
+                                showingCompare.historical.excerpt.firstLine,
+                                showingCompare.historical.excerpt.lastLine,
+                              )}
+                              ) permaneça idêntico.
+                            </p>
+                          )}
+                        <TextComparison
+                          before={showingCompare.historical.excerpt.text}
+                          after={showingCompare.present.text}
+                        />
+                      </>
+                    ) : (
+                      <p>
+                        Não foi possível comparar com o working tree atual (
+                        {presentStateLabels[showingCompare.present.state] ??
+                          showingCompare.present.state}
+                        ). A prova histórica não foi substituída pelo arquivo
+                        vivo.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {purgeTarget && (
+              <form className="cockpit-form" onSubmit={submitPurge}>
+                <strong>Confirmar expurgo local da decisão F1</strong>
+                <p className="observed">
+                  Remove todas as revisões e vínculos da afirmação{" "}
+                  <code>{purgeTarget.assertionId.slice(0, 12)}</code>,
+                  preservando capturas C01/C02 compartilhadas.
+                </p>
+                <label className="cockpit-field">
+                  Motivo do expurgo
+                  <input
+                    value={purgeReason}
+                    onChange={(e) => setPurgeReason(e.target.value)}
+                    required
+                  />
+                </label>
+                <label className="cockpit-check">
+                  <input
+                    type="checkbox"
+                    checked={purgeConfirmed}
+                    onChange={(e) => setPurgeConfirmed(e.target.checked)}
+                  />
+                  Confirmo o expurgo definitivo desta decisão neste escopo F1
+                </label>
+                <div className="cockpit-actions">
+                  <button
+                    type="submit"
+                    className="button primary"
+                    disabled={!purgeConfirmed || busyAction !== null}
+                  >
+                    Confirmar exclusão
+                  </button>
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => setPurgeTarget(null)}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {formOpen && (
+              <form className="cockpit-form" onSubmit={submitDecision}>
+                <strong>
+                  {editingDecision
+                    ? `Registrar revisão #${editingDecision.revision + 1}`
+                    : "Registrar decisão humana"}
+                </strong>
+                <label className="cockpit-field">
+                  Decisão
+                  <textarea
+                    rows={3}
+                    value={content}
+                    onChange={(e) => setContent(e.target.value)}
+                    required
+                  />
+                </label>
+                <label className="cockpit-field">
+                  Autor
+                  <input
+                    value={author}
+                    onChange={(e) => setAuthor(e.target.value)}
+                    required
+                  />
+                </label>
+                <label className="cockpit-field">
+                  Motivo
+                  <input
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                    required
+                  />
+                </label>
+                <label className="cockpit-field">
+                  Fonte preservada (C01)
+                  <select
+                    value={selectedSourceKey}
+                    disabled={sourcesLoading}
+                    onChange={(e) => {
+                      setSelectedSourceKey(e.target.value);
+                      if (!e.target.value) setPromoteCanonical(false);
+                    }}
+                  >
+                    <option value="">
+                      {sourcesLoading
+                        ? "Carregando capturas C01…"
+                        : "Sem fonte (provisória)"}
+                    </option>
+                    {editingDecision?.evidence.ref &&
+                      !sourceOptions.some(
+                        (o) =>
+                          o.value ===
+                          `${editingDecision.evidence.ref!.contextId}:${editingDecision.evidence.ref!.path}:${editingDecision.evidence.ref!.sha256}:${editingDecision.evidence.ref!.chunk}`,
+                      ) && (
+                        <option
+                          value={`${editingDecision.evidence.ref.contextId}:${editingDecision.evidence.ref.path}:${editingDecision.evidence.ref.sha256}:${editingDecision.evidence.ref.chunk}`}
+                        >
+                          {editingDecision.evidence.ref.path} (atual)
+                        </option>
+                      )}
+                    {sourceOptions.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  {!sourcesLoading && sourceOptions.length === 0 && (
+                    <small className="observed">
+                      Nenhuma captura C01 disponível ainda. Para vincular uma
+                      prova verificada, capture arquivos na aba Contexto.
+                    </small>
+                  )}
+                </label>
+                <label className="cockpit-check">
+                  <input
+                    type="checkbox"
+                    checked={humanConfirmed}
+                    onChange={(e) => setHumanConfirmed(e.target.checked)}
+                  />
+                  Confirmo autoria e aprovação humana desta revisão
+                </label>
+                <label className="cockpit-check">
+                  <input
+                    type="checkbox"
+                    checked={promoteCanonical}
+                    disabled={!selectedSourceKey}
+                    onChange={(e) => setPromoteCanonical(e.target.checked)}
+                  />
+                  Promover para decisão canônica verificada (requer fonte
+                  preservada)
+                </label>
+                <div className="cockpit-actions">
+                  <button
+                    type="submit"
+                    className="button primary"
+                    disabled={!humanConfirmed || busyAction !== null}
+                  >
+                    Salvar decisão
+                  </button>
+                  <button
+                    type="button"
+                    className="button"
+                    onClick={() => setFormOpen(false)}
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </form>
+            )}
+          </section>
+        )}
+        <section
+          className="ledger-region git-register"
+          aria-labelledby="repo-heading"
+        >
+          <div className="work-panel-heading">
+            <h2 id="repo-heading">Repositório Git</h2>
+            {currentObs?.state === "fresh" && (
+              <span className="badge fresh">Leitura atual do Git</span>
+            )}
+            {currentObs?.state === "cached" && (
+              <span className="badge cached">Cache datado</span>
+            )}
+            {currentObs?.state === "unavailable" && (
+              <span className="badge unavailable">Git indisponível</span>
+            )}
+          </div>
+          {displayGit && (
             <>
-              <dl className="repo-info">
+              <dl className="repo-info checkout-details">
                 <div>
                   <dt>Branch</dt>
                   <dd>
@@ -583,7 +1083,7 @@ export function ResumeCockpit({
                   </dd>
                 </div>
               </dl>
-              <dl className="change-counts">
+              <dl className="change-counts checkout-counts">
                 <div>
                   <dt>Preparadas</dt>
                   <dd>{displayGit.changes.staged}</dd>
@@ -603,12 +1103,13 @@ export function ResumeCockpit({
                   </div>
                 )}
               </dl>
+            </>
+          )}
+          <div className="checkout-footer">
+            {displayGit ? (
               <p className="observed" role="status">
                 {currentObs?.state === "fresh" ? (
-                  <>
-                    Leitura atual do Git ·{" "}
-                    {formatTimestamp(displayGit.observedAt)}
-                  </>
+                  <>Observado em {formatTimestamp(displayGit.observedAt)}</>
                 ) : currentObs?.state === "cached" ? (
                   <>
                     Última leitura do Git em cache (
@@ -622,514 +1123,94 @@ export function ResumeCockpit({
                   </>
                 )}
               </p>
-            </>
-          ) : currentObs?.state === "unavailable" ? (
-            <p className="observed" role="status">
-              Sem leitura Git anterior. Tentativa em{" "}
-              {formatTimestamp(currentObs.attemptedAt)}:{" "}
-              {gapLabels[currentObs.gap] ?? currentObs.gap}.
-            </p>
-          ) : loading ? (
-            <p className="observed" role="status">
-              Consultando retomada e Git…
-            </p>
-          ) : null}
-        </section>
-
-        <section className="panel" aria-labelledby="next-action-heading">
-          <div className="cockpit-badges">
-            <h2 id="next-action-heading">Próxima ação</h2>
-            <span className="badge advisory">Sugestão</span>
-          </div>
-          {resume ? (
-            <>
-              <p>
-                <strong>{resume.nextAction.label}</strong>
+            ) : currentObs?.state === "unavailable" ? (
+              <p className="observed" role="status">
+                Sem leitura Git anterior. Tentativa em{" "}
+                {formatTimestamp(currentObs.attemptedAt)}:{" "}
+                {gapLabels[currentObs.gap] ?? currentObs.gap}.
               </p>
-              <p>{resume.nextAction.rationale}</p>
-              {resume.nextAction.blockedByConflict && (
-                <p className="badge warning">
-                  Sugestão dependente suspensa por conflito material
-                </p>
-              )}
-              {resume.memory.conflicts.length > 0 && (
-                <ul className="cockpit-conflicts">
-                  {resume.memory.conflicts.map(
-                    (conflict: ResumeConflict, idx: number) => (
-                      <li
-                        key={`${conflict.kind}-${idx}`}
-                        className={`cockpit-conflict-item ${conflict.blocking ? "blocking" : ""}`}
-                      >
-                        <strong>
-                          {conflictLabels[conflict.kind] ?? conflict.kind}
-                        </strong>
-                        : {conflict.summary}
-                      </li>
-                    ),
-                  )}
-                </ul>
-              )}
-            </>
-          ) : (
-            <p>{loading ? "Compondo retomada…" : "Aguardando escopo."}</p>
-          )}
-        </section>
-      </div>
-
-      {resume && (
-        <section className="panel" aria-labelledby="decision-heading">
-          <div className="section-heading">
-            <h2 id="decision-heading">Decisão vigente</h2>
-            <button className="button" onClick={() => openForm(activeDecision)}>
-              {activeDecision ? "Nova revisão" : "Registrar decisão"}
+            ) : (
+              <p className="work-message" role="status">
+                {loading
+                  ? "Consultando retomada e Git…"
+                  : "Nenhuma leitura Git disponível."}
+              </p>
+            )}
+            <button
+              type="button"
+              className="text-button view-changes"
+              onClick={onViewChanges}
+            >
+              Ver alterações Git <VisualIcon name="forward" />
             </button>
           </div>
+        </section>
 
-          {!activeDecision ? (
-            <p>
-              Nenhuma decisão humana registrada neste escopo. Registre
-              manualmente ou anexe uma captura C01 existente.
-            </p>
-          ) : (
-            <div className="cockpit-stack">
-              <div className="cockpit-badges">
-                <span className="badge">
-                  Revisão #{activeDecision.revision}
-                </span>
-                <span
-                  className={`badge ${activeDecision.visibility === "canonical_verified" ? "verified" : ""}`}
-                >
-                  {activeDecision.visibility === "canonical_verified"
-                    ? "Canônica verificada"
-                    : "Local"}
-                </span>
-                <span
-                  className={`badge ${activeDecision.evidence.state === "verified" ? "verified" : "warning"}`}
-                >
-                  {activeDecision.evidence.state === "verified"
-                    ? "Evidência verificada"
-                    : (evidenceGapBadges[activeDecision.evidence.gap] ??
-                      `Lacuna (${activeDecision.evidence.gap})`)}
-                </span>
-              </div>
-
-              <p className="cockpit-decision-body">{activeDecision.content}</p>
-
-              <p className="observed">
-                Autor: <strong>{activeDecision.author}</strong> · Autoridade:{" "}
-                {activeDecision.authority === "human_promoted"
-                  ? "promoção humana"
-                  : "registro humano local"}{" "}
-                · Vigência: {formatTimestamp(activeDecision.effectiveAt)} ·
-                Registro: {formatTimestamp(activeDecision.recordedAt)}
+        {resume && (
+          <section
+            className="ledger-region activity-rail"
+            aria-labelledby="activity-heading"
+          >
+            <h2 id="activity-heading">Atividade registrada</h2>
+            {!resume.activity.lastCapture && !resume.activity.lastExecution ? (
+              <p className="observed empty-activity">
+                Nenhuma captura C01 ou execução anterior registrada.
               </p>
-
-              {activeDecision.evidence.ref && (
-                <p className="observed">
-                  Fonte vinculada:{" "}
-                  <code>{activeDecision.evidence.ref.path}</code> · captura{" "}
-                  <code>
-                    {activeDecision.evidence.ref.contextId.slice(0, 12)}
-                  </code>{" "}
-                  · SHA-256{" "}
-                  <code>{activeDecision.evidence.ref.sha256.slice(0, 12)}</code>{" "}
-                  · cobertura:{" "}
-                  {coverageLabels[activeDecision.evidence.coverage] ??
-                    activeDecision.evidence.coverage}
-                </p>
-              )}
-
-              {activeDecision.evidence.state === "gap" && (
-                <p className="observed">
-                  {evidenceGapLabels[activeDecision.evidence.gap] ??
-                    activeDecision.evidence.gap}
-                </p>
-              )}
-
-              <div className="cockpit-actions">
-                <button
-                  className="button"
-                  disabled={!activeDecision.evidence.ref || busyAction !== null}
-                  onClick={() => openPreview(activeDecision)}
-                >
-                  Abrir prova histórica
-                </button>
-                <button
-                  className="button"
-                  disabled={!activeDecision.evidence.ref || busyAction !== null}
-                  onClick={() => openCompare(activeDecision)}
-                >
-                  Comparar com o presente
-                </button>
-                {activeDecision.revision > 1 && (
-                  <button
-                    className="button"
-                    disabled={busyAction !== null}
-                    onClick={() => openHistory(activeDecision)}
-                  >
-                    {showingHistory
-                      ? "Ocultar histórico"
-                      : `Histórico (${activeDecision.revision} revisões)`}
-                  </button>
-                )}
-                <button
-                  className="button"
-                  disabled={busyAction !== null}
-                  onClick={() => {
-                    setPurgeTarget(activeDecision);
-                    setPurgeConfirmed(false);
-                    setFormOpen(false);
-                    setActionError(null);
-                  }}
-                >
-                  Excluir decisão (expurgo F1)
-                </button>
-              </div>
-
-              {showingHistory && (
-                <div className="cockpit-evidence-box">
-                  <strong>
-                    Histórico de revisões ({showingHistory.revisions.length})
-                  </strong>
-                  <ul className="cockpit-conflicts">
-                    {showingHistory.revisions.map((rev) => (
-                      <li
-                        key={rev.revisionId}
-                        className="cockpit-conflict-item"
-                      >
-                        <strong>Revisão #{rev.revision}</strong> (
-                        {rev.status === "active" ? "vigente" : "substituída"} ·{" "}
-                        {rev.visibility === "canonical_verified"
-                          ? "canônica verificada"
-                          : "local"}
-                        ) · {rev.author} · {formatTimestamp(rev.recordedAt)}
-                        <div>{rev.content}</div>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {showingEvidence && (
-                <div className="cockpit-evidence-box">
-                  <strong>
-                    Prova histórica preservada (
-                    {showingEvidence.evidence.state === "verified"
-                      ? showingEvidence.evidence.sourceOrigin ===
-                        "context_search"
-                        ? "índice C02"
-                        : "captura C01"
-                      : (evidenceGapBadges[showingEvidence.evidence.gap] ??
-                        `lacuna: ${showingEvidence.evidence.gap}`)}
-                    )
-                  </strong>
-                  {showingEvidence.evidence.ref && (
-                    <p className="observed">
-                      Caminho: <code>{showingEvidence.evidence.ref.path}</code>
-                      {showingEvidence.excerpt && (
-                        <>
-                          {" "}
-                          ·{" "}
-                          {formatLineRange(
-                            showingEvidence.excerpt.firstLine,
-                            showingEvidence.excerpt.lastLine,
-                          )}
-                        </>
-                      )}{" "}
-                      · SHA-256{" "}
+            ) : (
+              <ul className="activity-list">
+                {resume.activity.lastCapture && (
+                  <li>
+                    <div className="activity-header">
+                      <h3>Última captura C01</h3>
+                      <time dateTime={resume.activity.lastCapture.completedAt}>
+                        {formatTimestamp(
+                          resume.activity.lastCapture.completedAt,
+                        )}
+                      </time>
+                    </div>
+                    <p>
                       <code>
-                        {showingEvidence.evidence.ref.sha256.slice(0, 12)}
-                      </code>{" "}
-                      · Cobertura:{" "}
-                      {coverageLabels[showingEvidence.evidence.coverage] ??
-                        showingEvidence.evidence.coverage}
-                      {showingEvidence.evidence.capturedAt && (
+                        {resume.activity.lastCapture.contextId.slice(0, 12)}
+                      </code>
+                      {" · "}Estado{" "}
+                      <code>{resume.activity.lastCapture.status}</code>
+                      {" · "}
+                      {resume.activity.lastCapture.included} incluído(s),{" "}
+                      {resume.activity.lastCapture.omitted} omitido(s)
+                    </p>
+                  </li>
+                )}
+                {resume.activity.lastExecution && (
+                  <li>
+                    <div className="activity-header">
+                      <h3>Última tentativa simulada (Mock)</h3>
+                      <time dateTime={resume.activity.lastExecution.recordedAt}>
+                        {formatTimestamp(
+                          resume.activity.lastExecution.recordedAt,
+                        )}
+                      </time>
+                    </div>
+                    <p>
+                      Tarefa <code>{resume.activity.lastExecution.taskId}</code>{" "}
+                      · estado{" "}
+                      <code>{resume.activity.lastExecution.state}</code>
+                      {resume.activity.lastExecution.reviewChoice && (
                         <>
-                          {" "}
-                          · Capturada em{" "}
-                          {formatTimestamp(showingEvidence.evidence.capturedAt)}
+                          {" · "}revisão da tentativa:{" "}
+                          <code>
+                            {resume.activity.lastExecution.reviewChoice}
+                          </code>
                         </>
                       )}
                     </p>
-                  )}
-                  {showingEvidence.excerpt ? (
-                    <pre className="cockpit-excerpt">
-                      {showingEvidence.excerpt.text}
-                    </pre>
-                  ) : (
-                    <p>
-                      Sem trecho disponível devido a{" "}
-                      {showingEvidence.evidence.state === "gap"
-                        ? (evidenceGapLabels[showingEvidence.evidence.gap] ??
-                          showingEvidence.evidence.gap)
-                        : "lacuna"}
-                      .
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {showingCompare && (
-                <div className="cockpit-evidence-box">
-                  <strong>
-                    Comparação histórico × presente:{" "}
-                    {comparisonLabels[showingCompare.comparison] ??
-                      showingCompare.comparison}
-                  </strong>
-                  <p className="observed">
-                    Passado:{" "}
-                    {showingCompare.historical.evidence.capturedAt
-                      ? formatTimestamp(
-                          showingCompare.historical.evidence.capturedAt,
-                        )
-                      : "indisponível"}
-                    {showingCompare.historical.excerpt && (
-                      <>
-                        {" "}
-                        (
-                        {formatLineRange(
-                          showingCompare.historical.excerpt.firstLine,
-                          showingCompare.historical.excerpt.lastLine,
-                        )}
-                        )
-                      </>
-                    )}{" "}
-                    · Presente:{" "}
-                    {formatTimestamp(showingCompare.present.checkedAt)} (
-                    {presentStateLabels[showingCompare.present.state] ??
-                      showingCompare.present.state}
-                    )
-                  </p>
-                  {showingCompare.present.state === "available" &&
-                  showingCompare.historical.excerpt ? (
-                    <>
-                      {showingCompare.comparison === "differs" &&
-                        showingCompare.historical.excerpt.text ===
-                          showingCompare.present.text && (
-                          <p className="observed">
-                            O arquivo completo no working tree difere da captura
-                            histórica (SHA-256 distinto), embora o trecho
-                            vinculado (
-                            {formatLineRange(
-                              showingCompare.historical.excerpt.firstLine,
-                              showingCompare.historical.excerpt.lastLine,
-                            )}
-                            ) permaneça idêntico.
-                          </p>
-                        )}
-                      <TextComparison
-                        before={showingCompare.historical.excerpt.text}
-                        after={showingCompare.present.text}
-                      />
-                    </>
-                  ) : (
-                    <p>
-                      Não foi possível comparar com o working tree atual (
-                      {presentStateLabels[showingCompare.present.state] ??
-                        showingCompare.present.state}
-                      ). A prova histórica não foi substituída pelo arquivo
-                      vivo.
-                    </p>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {purgeTarget && (
-            <form className="cockpit-form" onSubmit={submitPurge}>
-              <strong>Confirmar expurgo local da decisão F1</strong>
-              <p className="observed">
-                Remove todas as revisões e vínculos da afirmação{" "}
-                <code>{purgeTarget.assertionId.slice(0, 12)}</code>, preservando
-                capturas C01/C02 compartilhadas.
-              </p>
-              <label className="cockpit-field">
-                Motivo do expurgo
-                <input
-                  value={purgeReason}
-                  onChange={(e) => setPurgeReason(e.target.value)}
-                  required
-                />
-              </label>
-              <label className="cockpit-check">
-                <input
-                  type="checkbox"
-                  checked={purgeConfirmed}
-                  onChange={(e) => setPurgeConfirmed(e.target.checked)}
-                />
-                Confirmo o expurgo definitivo desta decisão neste escopo F1
-              </label>
-              <div className="cockpit-actions">
-                <button
-                  type="submit"
-                  className="button primary"
-                  disabled={!purgeConfirmed || busyAction !== null}
-                >
-                  Confirmar exclusão
-                </button>
-                <button
-                  type="button"
-                  className="button"
-                  onClick={() => setPurgeTarget(null)}
-                >
-                  Cancelar
-                </button>
-              </div>
-            </form>
-          )}
-
-          {formOpen && (
-            <form className="cockpit-form" onSubmit={submitDecision}>
-              <strong>
-                {editingDecision
-                  ? `Registrar revisão #${editingDecision.revision + 1}`
-                  : "Registrar decisão humana"}
-              </strong>
-              <label className="cockpit-field">
-                Decisão
-                <textarea
-                  rows={3}
-                  value={content}
-                  onChange={(e) => setContent(e.target.value)}
-                  required
-                />
-              </label>
-              <label className="cockpit-field">
-                Autor
-                <input
-                  value={author}
-                  onChange={(e) => setAuthor(e.target.value)}
-                  required
-                />
-              </label>
-              <label className="cockpit-field">
-                Motivo
-                <input
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  required
-                />
-              </label>
-              <label className="cockpit-field">
-                Fonte preservada (C01)
-                <select
-                  value={selectedSourceKey}
-                  disabled={sourcesLoading}
-                  onChange={(e) => {
-                    setSelectedSourceKey(e.target.value);
-                    if (!e.target.value) setPromoteCanonical(false);
-                  }}
-                >
-                  <option value="">
-                    {sourcesLoading
-                      ? "Carregando capturas C01…"
-                      : "Sem fonte (provisória)"}
-                  </option>
-                  {editingDecision?.evidence.ref &&
-                    !sourceOptions.some(
-                      (o) =>
-                        o.value ===
-                        `${editingDecision.evidence.ref!.contextId}:${editingDecision.evidence.ref!.path}:${editingDecision.evidence.ref!.sha256}:${editingDecision.evidence.ref!.chunk}`,
-                    ) && (
-                      <option
-                        value={`${editingDecision.evidence.ref.contextId}:${editingDecision.evidence.ref.path}:${editingDecision.evidence.ref.sha256}:${editingDecision.evidence.ref.chunk}`}
-                      >
-                        {editingDecision.evidence.ref.path} (atual)
-                      </option>
-                    )}
-                  {sourceOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                {!sourcesLoading && sourceOptions.length === 0 && (
-                  <small className="observed">
-                    Nenhuma captura C01 disponível ainda. Para vincular uma
-                    prova verificada, capture arquivos na aba Contexto.
-                  </small>
+                    <p>Registro legado de execução simulada.</p>
+                  </li>
                 )}
-              </label>
-              <label className="cockpit-check">
-                <input
-                  type="checkbox"
-                  checked={humanConfirmed}
-                  onChange={(e) => setHumanConfirmed(e.target.checked)}
-                />
-                Confirmo autoria e aprovação humana desta revisão
-              </label>
-              <label className="cockpit-check">
-                <input
-                  type="checkbox"
-                  checked={promoteCanonical}
-                  disabled={!selectedSourceKey}
-                  onChange={(e) => setPromoteCanonical(e.target.checked)}
-                />
-                Promover para decisão canônica verificada (requer fonte
-                preservada)
-              </label>
-              <div className="cockpit-actions">
-                <button
-                  type="submit"
-                  className="button primary"
-                  disabled={!humanConfirmed || busyAction !== null}
-                >
-                  Salvar decisão
-                </button>
-                <button
-                  type="button"
-                  className="button"
-                  onClick={() => setFormOpen(false)}
-                >
-                  Cancelar
-                </button>
-              </div>
-            </form>
-          )}
-        </section>
-      )}
-
-      {resume && (
-        <section className="panel" aria-labelledby="activity-heading">
-          <h2 id="activity-heading">Última atividade anterior</h2>
-          {!resume.activity.lastCapture && !resume.activity.lastExecution ? (
-            <p>Nenhuma captura C01 ou execução anterior registrada.</p>
-          ) : (
-            <div className="cockpit-stack">
-              {resume.activity.lastCapture && (
-                <p>
-                  Última captura C01:{" "}
-                  <code>
-                    {resume.activity.lastCapture.contextId.slice(0, 12)}
-                  </code>{" "}
-                  · estado <code>{resume.activity.lastCapture.status}</code> ·{" "}
-                  {resume.activity.lastCapture.included} incluído(s),{" "}
-                  {resume.activity.lastCapture.omitted} omitido(s) ·{" "}
-                  {formatTimestamp(resume.activity.lastCapture.completedAt)}
-                </p>
-              )}
-              {resume.activity.lastExecution && (
-                <p>
-                  <span className="badge warning">
-                    Tentativa simulada legada (Mock) — não é decisão do projeto
-                  </span>{" "}
-                  Tarefa <code>{resume.activity.lastExecution.taskId}</code> ·
-                  estado <code>{resume.activity.lastExecution.state}</code>
-                  {resume.activity.lastExecution.reviewChoice && (
-                    <>
-                      {" "}
-                      · revisão da tentativa:{" "}
-                      <code>{resume.activity.lastExecution.reviewChoice}</code>
-                    </>
-                  )}{" "}
-                  · {formatTimestamp(resume.activity.lastExecution.recordedAt)}
-                </p>
-              )}
-            </div>
-          )}
-        </section>
-      )}
+              </ul>
+            )}
+          </section>
+        )}
+      </div>
     </div>
   );
 }

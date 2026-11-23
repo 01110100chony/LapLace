@@ -155,8 +155,8 @@ export function TaskExecutionView({
       className="context-result"
       aria-labelledby="task-execution-heading"
     >
-      <div className="section-heading">
-        <h3 id="task-execution-heading">Execução da tarefa</h3>
+      <div className="work-panel-heading">
+        <h4 id="task-execution-heading">Execução da tarefa</h4>
         <button
           type="button"
           className="text-button"
