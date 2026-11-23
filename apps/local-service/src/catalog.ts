@@ -334,48 +334,48 @@ export function openCatalog(dataDir: string) {
         return read(() => {
           const snap = latestSnapshotActivity.get(legacyProjectId) as
             | {
-              contextId: string;
-              head: string | null;
-              completedAt: string;
-              status: "complete" | "partial" | "invalidated";
-              included: number;
-              omitted: number;
-            }
+                contextId: string;
+                head: string | null;
+                completedAt: string;
+                status: "complete" | "partial" | "invalidated";
+                included: number;
+                omitted: number;
+              }
             | undefined;
           const exec = latestExecutionActivity.get(legacyProjectId) as
             | {
-              taskId: string;
-              executionId: string;
-              mode: string;
-              state: string;
-              recordedAt: string;
-              reviewChoice: "approved" | "rejected" | null;
-            }
+                taskId: string;
+                executionId: string;
+                mode: string;
+                state: string;
+                recordedAt: string;
+                reviewChoice: "approved" | "rejected" | null;
+              }
             | undefined;
           return {
             lastCapture: snap
               ? {
-                contextId: snap.contextId,
-                projectId: logicalProjectId,
-                head: snap.head,
-                completedAt: snap.completedAt,
-                status: snap.status,
-                included: Number(snap.included),
-                omitted: Number(snap.omitted),
-              }
+                  contextId: snap.contextId,
+                  projectId: logicalProjectId,
+                  head: snap.head,
+                  completedAt: snap.completedAt,
+                  status: snap.status,
+                  included: Number(snap.included),
+                  omitted: Number(snap.omitted),
+                }
               : null,
             lastExecution:
               exec && exec.mode === "mock_development"
                 ? {
-                  taskId: exec.taskId,
-                  executionId: exec.executionId,
-                  projectId: logicalProjectId,
-                  mode: "mock_development",
-                  state: exec.state,
-                  recordedAt: exec.recordedAt,
-                  reviewChoice: exec.reviewChoice ?? null,
-                  isLegacyAttemptNote: true,
-                }
+                    taskId: exec.taskId,
+                    executionId: exec.executionId,
+                    projectId: logicalProjectId,
+                    mode: "mock_development",
+                    state: exec.state,
+                    recordedAt: exec.recordedAt,
+                    reviewChoice: exec.reviewChoice ?? null,
+                    isLegacyAttemptNote: true,
+                  }
                 : null,
           };
         });

@@ -6,6 +6,7 @@ import {
 } from "@laplace/contracts";
 import { useId, useState, type FormEvent, type RefObject } from "react";
 import { DesktopError, errorMessage, type createDesktopClient } from "./ipc";
+import { VisualIcon } from "./VisualIcon";
 
 type Props = {
   dialogRef: RefObject<HTMLDialogElement | null>;
@@ -119,7 +120,7 @@ export function CloneDialog({ dialogRef, client, onSelected }: Props) {
           onClick={() => dialogRef.current?.close()}
           aria-label="Fechar"
         >
-          ×
+          <VisualIcon name="close" />
         </button>
       </div>
       <form className="task-fields" onSubmit={submit} aria-labelledby={heading}>
@@ -133,7 +134,9 @@ export function CloneDialog({ dialogRef, client, onSelected }: Props) {
           spellCheck={false}
           autoCapitalize="none"
           autoCorrect="off"
-          autoFocus
+          ref={(input) => {
+            if (input) input.autofocus = true;
+          }}
           disabled={busy}
           aria-invalid={invalidUrl || undefined}
           aria-describedby={hint}

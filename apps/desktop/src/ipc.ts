@@ -221,6 +221,8 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
             .historical.evidence;
           if (ev.ref !== null && ev.ref.contextId !== args.contextId)
             throw new DesktopError("invalid_response");
+        } else if (operation === "compiler.compile") {
+          // Scope validation above already verifies IdentityScope on F2 compile responses.
         } else if (
           !("contextId" in response.data) ||
           response.data.contextId !== args.contextId

@@ -1,5 +1,6 @@
 import {
   workingSelectionLimit,
+  type GitObservation,
   type WorkingChange,
   type WorkingComparison,
   type WorkingFile,
@@ -13,6 +14,8 @@ import { omissionLabels } from "./contextLabels";
 import { errorMessage, type createDesktopClient } from "./ipc";
 import { TextComparison } from "./TextComparison";
 import { createLatestRequest } from "./workspace";
+import { EmptyState, WorkHeading } from "./WorkView";
+import { VisualIcon } from "./VisualIcon";
 
 type Client = ReturnType<typeof createDesktopClient>["working"];
 const dateFormat = new Intl.DateTimeFormat("pt-BR", {
@@ -26,13 +29,45 @@ const stageLabels: Record<number, string> = {
   3: "Outra versão",
 };
 
-function changeLabel(change: WorkingChange) {
-  if (change.kind === "conflicted") return "Conflito";
-  if (change.kind === "untracked") return "Novo no disco";
-  const layers = [];
-  if (change.status[0] !== ".") layers.push("Índice");
-  if (change.status[1] !== "." || change.untracked) layers.push("Disco");
-  return layers.join(" e ");
+const filterLabels = {
+  all: "Todas",
+  staged: "Preparadas",
+  unstaged: "Não preparadas",
+  untracked: "Não rastreadas",
+  conflicted: "Conflitos",
+} as const;
+type Filter = keyof typeof filterLabels;
+type ChangeKind = Exclude<Filter, "all">;
+const changeLabels: Record<ChangeKind, string> = {
+  staged: "Índice",
+  unstaged: "Disco",
+  untracked: "Não rastreado",
+  conflicted: "Conflito",
+};
+const filters = Object.keys(filterLabels) as Filter[];
+
+function changeKinds(change: WorkingChange): ChangeKind[] {
+  if (change.kind === "untracked") return ["untracked"];
+  const kinds: ChangeKind[] = [];
+  if (change.kind === "conflicted") kinds.push("conflicted");
+  else {
+    if (change.status[0] !== ".") kinds.push("staged");
+    if (change.status[1] !== ".") kinds.push("unstaged");
+  }
+  if (change.untracked) kinds.push("untracked");
+  return kinds;
+}
+
+function FileKinds({ kinds }: { kinds: ChangeKind[] }) {
+  return (
+    <span className="git-file-kinds">
+      {kinds.map((kind) => (
+        <span className={`git-kind ${kind}`} key={kind}>
+          {changeLabels[kind]}
+        </span>
+      ))}
+    </span>
+  );
 }
 
 function VersionSummary({ version }: { version: WorkingVersion }) {
@@ -45,6 +80,13 @@ function VersionSummary({ version }: { version: WorkingVersion }) {
         <>
           {" "}
           · <code title={version.oid}>{version.oid.slice(0, 12)}</code>
+        </>
+      )}
+      {version.kind === "text" && (
+        <>
+          {" "}
+          · SHA-256{" "}
+          <code title={version.sha256}>{version.sha256.slice(0, 12)}</code>
         </>
       )}
     </>
@@ -85,10 +127,13 @@ function WorkingDiff({
   }, [client, kind, layer, path, projectId, snapshotId]);
 
   return (
-    <div className="working-diff">
-      <h4>
-        <code>{file.path}</code>
-      </h4>
+    <div className="working-diff git-diff work-divider">
+      <div className="work-panel-heading">
+        <h4>
+          <code>{file.path}</code>
+        </h4>
+        <FileKinds kinds={changeKinds(file)} />
+      </div>
       {file.from !== null && (
         <p className="context-muted">
           Origem <code>{file.from}</code>
@@ -110,16 +155,12 @@ function WorkingDiff({
         </>
       ) : (
         <>
-          <div
-            className="context-toolbar"
-            aria-label="Origem do diff"
-            role="group"
-          >
+          <div className="git-filters" aria-label="Origem do diff" role="group">
             {(["staged", "unstaged"] as const).map((source) => (
               <button
                 type="button"
                 key={source}
-                className="button"
+                className="git-filter"
                 aria-pressed={layer === source}
                 onClick={() => {
                   if (source === layer) return;
@@ -133,8 +174,13 @@ function WorkingDiff({
             ))}
           </div>
           {problem && (
-            <p className="service-error" role="alert">
+            <p className="work-message" role="alert">
               {problem}
+            </p>
+          )}
+          {!problem && !comparison && (
+            <p className="work-message" role="status">
+              Carregando comparação…
             </p>
           )}
           {comparison && (
@@ -162,6 +208,23 @@ function WorkingDiff({
                     before={comparison.beforeText}
                     after={comparison.afterText}
                   />
+                  <details className="git-provenance">
+                    <summary>Origem das duas versões</summary>
+                    <dl className="repo-info diff-versions">
+                      <div>
+                        <dt>Antes</dt>
+                        <dd>
+                          <VersionSummary version={comparison.before} />
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Depois</dt>
+                        <dd>
+                          <VersionSummary version={comparison.after} />
+                        </dd>
+                      </div>
+                    </dl>
+                  </details>
                 </>
               )}
             </>
@@ -174,14 +237,17 @@ function WorkingDiff({
 
 export function WorkingTreeView({
   projectId,
+  cockpitObservation,
   client,
 }: {
   projectId: string;
+  cockpitObservation?: GitObservation | null;
   client: Client;
 }) {
   const [listing, setListing] = useState<WorkingList>();
   const [snapshot, setSnapshot] = useState<WorkingSnapshot | null>();
   const [selection, setSelection] = useState<string[]>([]);
+  const [filter, setFilter] = useState<Filter>("all");
   const [path, setPath] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [capturing, setCapturing] = useState(false);
@@ -250,118 +316,257 @@ export function WorkingTreeView({
     );
   }
 
+  const entries = (listing?.changes ?? []).map((change) => ({
+    change,
+    kinds: changeKinds(change),
+  }));
+  const visible =
+    filter === "all"
+      ? entries
+      : entries.filter(({ kinds }) => kinds.includes(filter));
   const file = snapshot?.files.find((item) => item.path === path);
+
   return (
-    <section className="panel context-result" aria-labelledby="working-heading">
-      <header className="section-heading">
-        <h2 id="working-heading">Alterações Git</h2>
-        <button
-          className="text-button"
-          type="button"
-          disabled={loading || capturing}
-          onClick={refresh}
-        >
-          Atualizar alterações
-        </button>
-      </header>
-      {loading && <p className="context-muted">Consultando alterações…</p>}
-      {listError && (
-        <p className="service-error" role="alert">
-          {listError}
-        </p>
+    <section className="git-surface" aria-labelledby="working-heading">
+      <WorkHeading
+        id="working-heading"
+        title="Alterações Git"
+        description="Inspecione o checkout e compare versões preservadas."
+        actions={
+          <button
+            className="button"
+            type="button"
+            disabled={loading || capturing}
+            onClick={refresh}
+          >
+            <VisualIcon name="refresh" /> Atualizar alterações
+          </button>
+        }
+      />
+      {(cockpitObservation || listing) && (
+        <dl className="checkout-reading">
+          {cockpitObservation && (
+            <div>
+              <dt>Branch na leitura do cockpit</dt>
+              <dd>
+                <code>{cockpitObservation.branch ?? "HEAD destacado"}</code>
+              </dd>
+              <dd>
+                <time dateTime={cockpitObservation.observedAt}>
+                  {dateFormat.format(new Date(cockpitObservation.observedAt))}
+                </time>
+              </dd>
+            </div>
+          )}
+          {listing && (
+            <div>
+              <dt>HEAD da listagem</dt>
+              <dd>
+                {listing.head ? (
+                  <code title={listing.head}>{listing.head.slice(0, 12)}</code>
+                ) : (
+                  "Sem commits"
+                )}
+              </dd>
+            </div>
+          )}
+        </dl>
       )}
-      {listing && listing.changes.length === 0 && (
-        <p>Nenhuma alteração disponível para captura.</p>
-      )}
-      {listing && listing.changes.length > 0 && (
-        <>
-          <fieldset className="context-files" disabled={capturing || loading}>
-            <legend>Arquivos para capturar</legend>
-            {listing.changes.map((change) => (
-              <label className="context-file" key={change.path}>
-                <input
-                  type="checkbox"
-                  checked={selection.includes(change.path)}
-                  disabled={
-                    selection.length === workingSelectionLimit &&
-                    !selection.includes(change.path)
-                  }
-                  onChange={({ target }) =>
-                    setSelection((current) =>
-                      target.checked
-                        ? [...current, change.path]
-                        : current.filter((item) => item !== change.path),
-                    )
-                  }
-                />
-                <code>{change.path}</code> <small>{changeLabel(change)}</small>
-              </label>
-            ))}
-          </fieldset>
-          <div className="context-toolbar">
-            <button
-              type="button"
-              className="button primary"
-              disabled={capturing || loading || !selection.length}
-              onClick={capture}
-            >
-              {capturing ? "Capturando…" : "Capturar alterações"}
-            </button>
-            <small>
-              {selection.length} de {workingSelectionLimit} selecionados
-            </small>
-          </div>
-          {listing.limited && (
-            <p className="context-muted">
-              A lista atingiu o limite de alterações exibidas.
+      <div className="work-grid git-layout">
+        <section className="panel" aria-labelledby="git-live-heading">
+          <header className="work-panel-heading">
+            <h3 id="git-live-heading">Árvore de trabalho</h3>
+            {listing && (
+              <small>
+                Leitura de{" "}
+                <time dateTime={listing.observedAt}>
+                  {dateFormat.format(new Date(listing.observedAt))}
+                </time>
+              </small>
+            )}
+          </header>
+          {loading && (
+            <p className="work-message" role="status">
+              Consultando alterações…
             </p>
           )}
-        </>
-      )}
-      {captureError && (
-        <p className="service-error" role="alert">
-          {captureError}
-        </p>
-      )}
-      {snapshot && (
-        <section aria-labelledby="working-saved-heading">
-          <h3 id="working-saved-heading">Captura Git preservada</h3>
-          <p className="context-muted">
-            <time dateTime={snapshot.capturedAt}>
-              {dateFormat.format(new Date(snapshot.capturedAt))}
-            </time>{" "}
-            ·{" "}
-            {snapshot.head ? (
-              <code title={snapshot.head}>{snapshot.head.slice(0, 12)}</code>
-            ) : (
-              "Sem commit"
-            )}
-          </p>
-          <ul className="context-list">
-            {snapshot.files.map((saved) => (
-              <li key={saved.path}>
+          {listError && (
+            <p className="work-message" role="alert">
+              {listError}
+            </p>
+          )}
+          {listing && !loading && entries.length === 0 && (
+            <EmptyState
+              icon="check"
+              title="Nenhuma alteração disponível para captura"
+            >
+              A lista mostra os caminhos que podem ser selecionados neste
+              checkout.
+            </EmptyState>
+          )}
+          {entries.length > 0 && (
+            <>
+              <div
+                className="git-filters"
+                role="group"
+                aria-label="Filtrar arquivos por estado"
+              >
+                {filters.map((kind) => {
+                  const count =
+                    kind === "all"
+                      ? entries.length
+                      : entries.filter((entry) => entry.kinds.includes(kind))
+                          .length;
+                  if (kind === "conflicted" && !count && filter !== kind)
+                    return null;
+                  return (
+                    <button
+                      key={kind}
+                      type="button"
+                      className="git-filter"
+                      aria-pressed={filter === kind}
+                      onClick={() => setFilter(kind)}
+                    >
+                      {filterLabels[kind]} <small>{count}</small>
+                    </button>
+                  );
+                })}
+              </div>
+              <fieldset className="git-files" disabled={capturing || loading}>
+                <legend className="visually-hidden">
+                  Arquivos para capturar
+                </legend>
+                {visible.length === 0 && (
+                  <p className="work-message" role="status">
+                    Nenhum arquivo nesta categoria.
+                  </p>
+                )}
+                {visible.map(({ change, kinds }) => (
+                  <label className="git-file" key={change.path}>
+                    <input
+                      type="checkbox"
+                      checked={selection.includes(change.path)}
+                      disabled={
+                        selection.length >= workingSelectionLimit &&
+                        !selection.includes(change.path)
+                      }
+                      onChange={({ target }) =>
+                        setSelection((current) =>
+                          target.checked
+                            ? [...current, change.path]
+                            : current.filter((item) => item !== change.path),
+                        )
+                      }
+                    />
+                    <code>{change.path}</code>
+                    <FileKinds kinds={kinds} />
+                  </label>
+                ))}
+              </fieldset>
+              {listing?.limited && (
+                <p className="work-message">
+                  A lista atingiu o limite de alterações exibidas.
+                </p>
+              )}
+              <div className="context-toolbar git-selection">
+                <small className="work-muted">
+                  {selection.length} de {workingSelectionLimit} selecionados
+                </small>
                 <button
                   type="button"
-                  className="context-history-row"
-                  aria-current={path === saved.path ? "true" : undefined}
-                  onClick={() => setPath(saved.path)}
+                  className="button primary"
+                  disabled={capturing || loading || !selection.length}
+                  onClick={capture}
                 >
-                  <code>{saved.path}</code>
-                  <small>{changeLabel(saved)}</small>
+                  <VisualIcon name="archive" />{" "}
+                  {capturing ? "Capturando…" : "Capturar alterações"}
                 </button>
-              </li>
-            ))}
-          </ul>
-          {file && (
-            <WorkingDiff
-              key={`${snapshot.snapshotId}/${file.path}`}
-              client={client}
-              snapshot={snapshot}
-              file={file}
-            />
+              </div>
+            </>
+          )}
+          {captureError && (
+            <p className="work-message" role="alert">
+              {captureError}
+            </p>
           )}
         </section>
-      )}
+        <section className="panel" aria-labelledby="working-saved-heading">
+          <header className="work-panel-heading">
+            <h3 id="working-saved-heading">Captura Git preservada</h3>
+          </header>
+          {snapshot === undefined && !captureError && (
+            <p className="work-message" role="status">
+              Buscando última captura…
+            </p>
+          )}
+          {snapshot === null && (
+            <EmptyState icon="archive" title="Nenhuma captura Git preservada">
+              Selecione arquivos na árvore de trabalho para comparar as versões.
+            </EmptyState>
+          )}
+          {snapshot && (
+            <>
+              <p className="work-muted">
+                <time dateTime={snapshot.capturedAt}>
+                  {dateFormat.format(new Date(snapshot.capturedAt))}
+                </time>
+                {" · "}
+                <code>
+                  {snapshot.branch ??
+                    (snapshot.head ? "HEAD destacado" : "Sem commits")}
+                </code>
+                {snapshot.head && (
+                  <>
+                    {" "}
+                    ·{" "}
+                    <code title={snapshot.head}>
+                      {snapshot.head.slice(0, 12)}
+                    </code>
+                  </>
+                )}
+              </p>
+              <details className="git-provenance">
+                <summary>Proveniência da captura</summary>
+                <dl className="repo-info">
+                  <div>
+                    <dt>Captura</dt>
+                    <dd>
+                      <code>{snapshot.snapshotId}</code>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt>SHA-256</dt>
+                    <dd>
+                      <code>{snapshot.digest}</code>
+                    </dd>
+                  </div>
+                </dl>
+              </details>
+              {file && (
+                <label className="work-field">
+                  <span>Arquivo preservado</span>
+                  <select
+                    value={file.path}
+                    onChange={(event) => setPath(event.target.value)}
+                  >
+                    {snapshot.files.map((saved) => (
+                      <option key={saved.path}>{saved.path}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {file && (
+                <WorkingDiff
+                  key={`${snapshot.snapshotId}/${file.path}`}
+                  client={client}
+                  snapshot={snapshot}
+                  file={file}
+                />
+              )}
+            </>
+          )}
+        </section>
+      </div>
     </section>
   );
 }

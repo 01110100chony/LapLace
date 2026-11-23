@@ -7,10 +7,17 @@ import type {
   ProjectRecord,
   ResumeSummary,
 } from "@laplace/contracts";
-import { useState } from "react";
+import type { RefObject } from "react";
 import { ContextView } from "./ContextView";
+import { ProjectNavigation } from "./DesktopNavigation";
+import { ProjectTaskDigest } from "./ProjectTaskDigest";
 import { ResumeCockpit } from "./ResumeCockpit";
 import { TaskView, type TaskProposal } from "./TaskView";
+import { SpectralField } from "./SpectralField";
+import { VisualIcon } from "./VisualIcon";
+import type { PreviewId, ProjectSection } from "./navigation";
+import { EmptyState } from "./WorkView";
+import type { Theme } from "./appearance";
 import { WorkingTreeView } from "./WorkingTreeView";
 import type { createDesktopClient } from "./ipc";
 
@@ -29,10 +36,14 @@ type HomeProps = {
   summaries: Readonly<Record<string, GitObservation | undefined>>;
   recent: ProjectRecord | undefined;
   service: ServiceStatus;
+  theme: Theme;
+  paused: boolean;
+  spectralPhase: RefObject<number>;
   add: () => void;
   clone: () => void;
   open: (project: ProjectRecord) => void;
   retryService: () => void;
+  openLab: (id?: PreviewId) => void;
 };
 
 function branchLabel(summary: GitSummary) {
@@ -44,176 +55,298 @@ export function Home({
   summaries,
   recent,
   service,
+  theme,
+  paused,
+  spectralPhase,
   add,
   clone,
   open,
   retryService,
+  openLab,
 }: HomeProps) {
-  const recentSummary = recent && summaries[recent.id];
-  return (
-    <>
-      <header className="headline">
-        <div>
-          <p className="label">Workspace pessoal</p>
-          <h1>Área de trabalho</h1>
-        </div>
-        {recent && (
-          <button
-            className="button"
-            disabled={service.state !== "ready"}
-            onClick={add}
-          >
-            <span aria-hidden="true">+</span> Adicionar projeto
-          </button>
-        )}
-      </header>
+  const recentSummary = recent ? summaries[recent.id] : undefined;
+  const ready = service.state === "ready";
+  const readings = projects
+    .flatMap((project) => {
+      const reading = summaries[project.id];
+      return reading ? [{ project, reading }] : [];
+    })
+    .sort((left, right) =>
+      right.reading.observedAt.localeCompare(left.reading.observedAt),
+    );
 
-      <div className="body-grid">
-        <div>
-          <section className="hero" aria-labelledby="next-project">
-            <span className="watermark" aria-hidden="true">
-              λ
-            </span>
-            <p className="label">{recent ? "Continuar" : "Projetos locais"}</p>
-            <h2 id="next-project">
-              {recent
-                ? recent.name
-                : service.state === "ready"
-                  ? "Abra seu primeiro projeto"
-                  : "Projetos locais"}
-            </h2>
-            <p>
-              {recentSummary ? (
-                <>
-                  <code>{branchLabel(recentSummary)}</code> ·{" "}
-                  {recentSummary.head
-                    ? "Última leitura Git em"
-                    : "Sem commits na leitura de"}{" "}
-                  <ObservedTime summary={recentSummary} />
-                </>
-              ) : recent ? (
-                recent.root
-              ) : (
-                "Selecione uma pasta para consultar a branch, o HEAD e as alterações do Git."
-              )}
-            </p>
-            <div className="workspace-actions">
-              {recent ? (
-                <button className="button primary" onClick={() => open(recent)}>
-                  Abrir projeto <span aria-hidden="true">→</span>
-                </button>
-              ) : (
-                <button
-                  className="button primary"
-                  disabled={service.state !== "ready"}
-                  onClick={add}
-                >
-                  <span aria-hidden="true">+</span> Adicionar projeto
-                </button>
-              )}
+  return (
+    <div className="workspace-view workspace-dashboard">
+      <div className="workspace-flow">
+        <header className="workspace-masthead">
+          <div className="masthead-copy">
+            <p className="eyebrow">Workspace local</p>
+            <h1>Área de trabalho</h1>
+            <p>Projetos, evidências e o próximo passo de cada checkout.</p>
+            <div className="work-actions">
               <button
+                type="button"
+                className="button primary"
+                disabled={!ready}
+                onClick={add}
+              >
+                <VisualIcon name="plus" /> Adicionar projeto
+              </button>
+              <button
+                type="button"
                 className="button"
-                disabled={service.state !== "ready"}
+                disabled={!ready}
                 onClick={clone}
               >
-                Clonar do GitHub
+                <VisualIcon name="download" /> Clonar do GitHub
               </button>
             </div>
-          </section>
+          </div>
+          <SpectralField
+            theme={theme}
+            paused={paused}
+            phase={spectralPhase}
+            scene="workspace"
+          />
+        </header>
 
-          <section className="projects" aria-labelledby="projects-heading">
-            <header className="section-heading">
-              <h2 id="projects-heading">Projetos</h2>
-              <span>
-                {projects.length === 1
-                  ? "1 local"
-                  : `${projects.length} locais`}
-              </span>
-            </header>
-            {projects.length ? (
-              <ul className="project-list">
-                {projects.map((project) => (
-                  <li key={project.id}>
-                    <button
-                      className="project-row"
-                      onClick={() => open(project)}
-                    >
-                      <span className="project-icon" aria-hidden="true">
-                        {Array.from(project.name)[0]}
-                      </span>
-                      <span className="project-row-name">
-                        <strong>{project.name}</strong>
-                        <small title={project.root}>{project.root}</small>
-                      </span>
-                      {summaries[project.id] ? (
-                        <code className="tag">
-                          {branchLabel(summaries[project.id]!)} · cache
-                        </code>
-                      ) : (
-                        <span aria-hidden="true" />
-                      )}
-                      <span className="chevron" aria-hidden="true">
-                        ›
-                      </span>
-                    </button>
-                  </li>
-                ))}
+        <section className="project-register" aria-labelledby="local-projects">
+          <header className="register-heading dashboard-heading">
+            <VisualIcon name="folder" />
+            <h2 id="local-projects">Projetos locais</h2>
+            <span className="badge">{projects.length}</span>
+          </header>
+          {projects.length ? (
+            <div
+              className="directory"
+              role="group"
+              aria-label="Projetos cadastrados"
+            >
+              <ul>
+                {projects.map((project) => {
+                  const observation = summaries[project.id];
+                  return (
+                    <li key={project.id}>
+                      <button
+                        className="directory-row"
+                        type="button"
+                        onClick={() => open(project)}
+                        title={project.root}
+                      >
+                        <span className="directory-project">
+                          <span className="project-initial" aria-hidden="true">
+                            <VisualIcon name="folder" />
+                          </span>
+                          <span className="directory-name">
+                            <strong>{project.name}</strong>
+                            {observation ? (
+                              <code>{branchLabel(observation)}</code>
+                            ) : (
+                              <small>{project.root}</small>
+                            )}
+                          </span>
+                        </span>
+                        <span className="directory-observation">
+                          {observation ? (
+                            <small>
+                              <ObservedTime summary={observation} />
+                            </small>
+                          ) : (
+                            <small>Sem leitura nesta sessão</small>
+                          )}
+                        </span>
+                        <VisualIcon name="forward" />
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
-            ) : (
-              <p className="empty">
-                {service.state === "ready"
-                  ? "Nenhum projeto adicionado."
-                  : service.state === "loading"
-                    ? "Carregando projetos…"
-                    : "Catálogo indisponível."}
-              </p>
-            )}
-          </section>
-        </div>
-        <ServicePanel service={service} retry={retryService} />
-      </div>
-    </>
-  );
-}
-
-function ServicePanel({
-  service,
-  retry,
-}: {
-  service: ServiceStatus;
-  retry: () => void;
-}) {
-  return (
-    <aside className="rail" aria-labelledby="service-heading">
-      <p className="label">Ambiente local</p>
-      <h2 id="service-heading">Serviço local</h2>
-      <div className="service-details">
-        <p className={`signal ${service.state}`} role="status">
-          <span className="status-dot" aria-hidden="true" />
-          {service.state === "ready"
-            ? "Conectado"
-            : service.state === "loading"
-              ? "Conectando…"
-              : "Indisponível"}
-        </p>
-        {service.state === "ready" && (
-          <p className="service-version">
-            Laplace <code>{service.health.version}</code> · Node.js{" "}
-            <code>{service.health.nodeVersion}</code>
-          </p>
-        )}
-        {service.state === "error" && (
-          <>
-            <p className="service-error" role="alert">
-              {service.message}
+            </div>
+          ) : service.state === "loading" ? (
+            <p className="work-message" role="status">
+              Carregando catálogo…
             </p>
-            <button className="text-button" onClick={retry}>
-              Reconectar
-            </button>
-          </>
-        )}
+          ) : (
+            <EmptyState
+              icon="folder"
+              title={
+                ready ? "Nenhum projeto no catálogo" : "Catálogo indisponível"
+              }
+            >
+              {ready
+                ? "Adicione um checkout ou selecione um repositório do GitHub para clonar."
+                : "Reconecte o serviço local para acessar seus projetos."}
+            </EmptyState>
+          )}
+        </section>
+
+        <section
+          className="dashboard-panel workspace-activity"
+          aria-labelledby="workspace-activity"
+        >
+          <header className="dashboard-heading">
+            <VisualIcon name="clock" />
+            <h2 id="workspace-activity">Leituras recentes</h2>
+          </header>
+          {readings.length ? (
+            <ul>
+              {readings.slice(0, 4).map(({ project, reading }) => (
+                <li key={project.id}>
+                  <button
+                    type="button"
+                    className="activity-row"
+                    onClick={() => open(project)}
+                  >
+                    <span className="dashboard-icon">
+                      <VisualIcon name="git" />
+                    </span>
+                    <span>
+                      <strong>{project.name}</strong>
+                      <small>
+                        Checkout observado · <code>{branchLabel(reading)}</code>
+                      </small>
+                    </span>
+                    <ObservedTime summary={reading} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="work-muted">
+              Abra um projeto para registrar a primeira leitura Git desta
+              sessão.
+            </p>
+          )}
+        </section>
       </div>
-    </aside>
+
+      <aside className="continuity-desk" aria-label="Retomada e ferramentas">
+        <section className="dashboard-panel desk-section desk-resume">
+          <header className="dashboard-heading">
+            <VisualIcon name="overview" />
+            <h2>Retomada</h2>
+          </header>
+          {recent ? (
+            <>
+              <p className="desk-project-name">{recent.name}</p>
+              {recentSummary ? (
+                <>
+                  <p className="desk-branch">
+                    <VisualIcon name="git" />{" "}
+                    <code>{branchLabel(recentSummary)}</code>
+                  </p>
+                  <p className="desk-changes">
+                    {recentSummary.changes.staged} no índice ·{" "}
+                    {recentSummary.changes.unstaged} no disco ·{" "}
+                    {recentSummary.changes.untracked} sem rastreio
+                    {recentSummary.changes.conflicted > 0 && (
+                      <> · {recentSummary.changes.conflicted} em conflito</>
+                    )}
+                  </p>
+                  <p className="work-muted">
+                    Observado em <ObservedTime summary={recentSummary} />
+                  </p>
+                </>
+              ) : (
+                <p className="work-muted">
+                  Abra o projeto para verificar o checkout.
+                </p>
+              )}
+              <button
+                type="button"
+                className="button primary"
+                onClick={() => open(recent)}
+              >
+                Retomar projeto <VisualIcon name="forward" />
+              </button>
+            </>
+          ) : (
+            <p className="work-muted">O último projeto aberto aparece aqui.</p>
+          )}
+        </section>
+
+        <section className="dashboard-panel desk-section">
+          <header className="dashboard-heading">
+            <VisualIcon name="layers" />
+            <h2>Contexto do workspace</h2>
+          </header>
+          <dl className="workspace-facts">
+            <div>
+              <dt>Projetos locais</dt>
+              <dd>{projects.length}</dd>
+            </div>
+            <div>
+              <dt>Projetos lidos</dt>
+              <dd>{readings.length}</dd>
+            </div>
+          </dl>
+          <div className="workspace-health">
+            <span className={"health-signal " + service.state}>
+              <span className="status-dot" aria-hidden="true" />
+              {ready
+                ? "Serviço conectado"
+                : service.state === "loading"
+                  ? "Conectando ao serviço…"
+                  : "Serviço local indisponível"}
+            </span>
+            {service.state === "ready" && (
+              <span>
+                LapLace <code>{service.health.version}</code> · Node.js{" "}
+                <code>{service.health.nodeVersion}</code>
+              </span>
+            )}
+            {service.state === "error" && (
+              <>
+                <span role="alert">{service.message}</span>
+                <button
+                  type="button"
+                  className="text-button"
+                  onClick={retryService}
+                >
+                  Reconectar
+                </button>
+              </>
+            )}
+          </div>
+        </section>
+
+        <section className="dashboard-panel desk-section">
+          <header className="dashboard-heading">
+            <VisualIcon name="lab" />
+            <h2>Ferramentas</h2>
+            <span className="badge">Prévia</span>
+          </header>
+          <button
+            className="desk-link"
+            type="button"
+            onClick={() => openLab("agents")}
+          >
+            <span className="dashboard-icon">
+              <VisualIcon name="agent" />
+            </span>
+            <span>
+              <strong>Central de agentes</strong>
+              <small>Sessões, tentativas e revisão</small>
+            </span>
+            <VisualIcon name="chevron" />
+          </button>
+          <button
+            className="desk-link"
+            type="button"
+            onClick={() => openLab("graph")}
+          >
+            <span className="dashboard-icon">
+              <VisualIcon name="graph" />
+            </span>
+            <span>
+              <strong>KGraph</strong>
+              <small>Decisões, fontes e tarefas</small>
+            </span>
+            <VisualIcon name="chevron" />
+          </button>
+        </section>
+      </aside>
+    </div>
   );
 }
 
@@ -236,6 +369,9 @@ export function ProjectView({
   identity,
   resume,
   status,
+  theme,
+  paused,
+  spectralPhase,
   refresh,
   relocate,
   confirmIdentity,
@@ -247,12 +383,20 @@ export function ProjectView({
   workingClient,
   decisionClient,
   onResumeUpdated,
+  section,
+  taskProposal,
+  onTaskProposal,
+  onSection,
+  openLab,
 }: {
   project: ProjectRecord;
   summary: GitObservation | undefined;
   identity: ProjectIdentityResult | null;
   resume: ResumeSummary | null;
   status: ProjectStatus;
+  theme: Theme;
+  paused: boolean;
+  spectralPhase: RefObject<number>;
   refresh: () => void;
   relocate: () => void;
   confirmIdentity: () => Promise<Project>;
@@ -264,65 +408,71 @@ export function ProjectView({
   workingClient: ReturnType<typeof createDesktopClient>["working"];
   decisionClient: ReturnType<typeof createDesktopClient>["decisions"];
   onResumeUpdated: () => void;
+  section: ProjectSection;
+  taskProposal?: TaskProposal;
+  onTaskProposal: (source: TaskProposal["source"], objective: string) => void;
+  onSection: (section: ProjectSection) => void;
+  openLab: (id: PreviewId) => void;
 }) {
   const loading = status.state === "loading";
-  const [section, setSection] = useState<
-    "overview" | "context" | "tasks" | "working"
-  >("overview");
-  const [taskProposal, setTaskProposal] = useState<TaskProposal>();
+  const overview = section === "overview";
+  const observation = resume ? resume.observation.observation : summary;
+  const refreshControl = (overview || status.state !== "ready") && (
+    <button
+      type="button"
+      className="button masthead-refresh"
+      aria-disabled={loading || undefined}
+      onClick={() => {
+        if (!loading) refresh();
+      }}
+    >
+      <VisualIcon name="refresh" /> Atualizar Git
+    </button>
+  );
+
   return (
     <>
-      <header className="headline project-headline">
-        <div>
-          <p className="label">Projeto local</p>
+      <header
+        className={overview ? "project-masthead" : "project-masthead subview"}
+      >
+        <div className="project-identity">
+          {overview && <p className="eyebrow">Retomada do projeto</p>}
           <h1>{project.name}</h1>
-          <p className="project-path">
-            <code>{project.root}</code>
-          </p>
+          <div className="project-identifiers">
+            {observation && (
+              <span className="project-branch-inline">
+                <VisualIcon name="git" />{" "}
+                <code>{branchLabel(observation)}</code>
+              </span>
+            )}
+            <details className="project-path">
+              <summary title={project.root}>
+                <VisualIcon name="folder" />
+                <span className="visually-hidden">Pasta do checkout</span>
+                <code>{project.root}</code>
+                <VisualIcon name="chevron" />
+              </summary>
+              <code className="project-path-full">{project.root}</code>
+            </details>
+          </div>
         </div>
-        <button
-          className="button"
-          aria-disabled={loading || undefined}
-          onClick={() => {
-            if (!loading) refresh();
-          }}
-        >
-          Atualizar
-        </button>
+        {overview ? (
+          <div className="project-horizon">
+            <SpectralField
+              theme={theme}
+              paused={paused}
+              phase={spectralPhase}
+              scene={project.id}
+            />
+            {refreshControl}
+          </div>
+        ) : (
+          refreshControl
+        )}
       </header>
-      <nav className="project-sections" aria-label="Seções do projeto">
-        <button
-          className="button"
-          aria-current={section === "overview" ? "page" : undefined}
-          onClick={() => setSection("overview")}
-        >
-          Visão geral
-        </button>
-        <button
-          className="button"
-          aria-current={section === "context" ? "page" : undefined}
-          onClick={() => setSection("context")}
-        >
-          Contexto
-        </button>
-        <button
-          className="button"
-          aria-current={section === "tasks" ? "page" : undefined}
-          onClick={() => {
-            if (section !== "tasks") setTaskProposal(undefined);
-            setSection("tasks");
-          }}
-        >
-          Tarefas
-        </button>
-        <button
-          className="button"
-          aria-current={section === "working" ? "page" : undefined}
-          onClick={() => setSection("working")}
-        >
-          Alterações Git
-        </button>
-      </nav>
+      {!overview && (
+        <ProjectNavigation section={section} onSection={onSection} />
+      )}
       {loading && (
         <p className="panel loading inspection-status" role="status">
           <span aria-hidden="true" /> Consultando o Git…
@@ -344,11 +494,13 @@ export function ProjectView({
           client={taskClient}
           executionClient={executionClient}
           proposal={taskProposal}
+          openAgents={() => openLab("agents")}
         />
       ) : section === "working" ? (
         <WorkingTreeView
           key={project.root}
           projectId={project.id}
+          cockpitObservation={resume ? resume.observation.observation : summary}
           client={workingClient}
         />
       ) : section === "context" ? (
@@ -360,25 +512,72 @@ export function ProjectView({
           client={contextClient}
           codex={codexClient}
           compiler={compilerClient}
-          onCreateTask={(source, question) => {
-            setTaskProposal({ source, objective: question });
-            setSection("tasks");
-          }}
+          onCreateTask={onTaskProposal}
+          openMemory={() => openLab("memory")}
         />
       ) : (
-        <ResumeCockpit
-          key={project.id}
-          project={project}
-          fallbackSummary={summary}
-          identity={identity}
-          resume={resume}
-          loading={loading}
-          relocate={relocate}
-          confirmIdentity={confirmIdentity}
-          contextClient={contextClient}
-          decisionClient={decisionClient}
-          onResumeUpdated={onResumeUpdated}
-        />
+        <>
+          <ResumeCockpit
+            navigation={
+              <ProjectNavigation section={section} onSection={onSection} />
+            }
+            key={project.id}
+            project={project}
+            fallbackSummary={summary}
+            identity={identity}
+            resume={resume}
+            loading={loading}
+            relocate={relocate}
+            confirmIdentity={confirmIdentity}
+            contextClient={contextClient}
+            decisionClient={decisionClient}
+            onResumeUpdated={onResumeUpdated}
+            onViewChanges={() => onSection("working")}
+          />
+          {resume && (
+            <div className="project-followup">
+              <ProjectTaskDigest
+                projectId={project.id}
+                client={taskClient}
+                openTasks={() => onSection("tasks")}
+              />
+              <section className="dashboard-panel project-connections">
+                <header className="dashboard-heading">
+                  <VisualIcon name="layers" />
+                  <h2>Contexto e relações</h2>
+                </header>
+                <button
+                  className="desk-link"
+                  type="button"
+                  onClick={() => onSection("context")}
+                >
+                  <span className="dashboard-icon">
+                    <VisualIcon name="archive" />
+                  </span>
+                  <span>
+                    <strong>Fontes do projeto</strong>
+                    <small>Capturas preservadas e índice de busca</small>
+                  </span>
+                  <VisualIcon name="chevron" />
+                </button>
+                <button
+                  className="desk-link"
+                  type="button"
+                  onClick={() => openLab("graph")}
+                >
+                  <span className="dashboard-icon">
+                    <VisualIcon name="graph" />
+                  </span>
+                  <span>
+                    <strong>KGraph · prévia</strong>
+                    <small>Explorar relações no Laboratório</small>
+                  </span>
+                  <VisualIcon name="chevron" />
+                </button>
+              </section>
+            </div>
+          )}
+        </>
       )}
     </>
   );

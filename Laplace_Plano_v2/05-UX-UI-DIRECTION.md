@@ -54,6 +54,52 @@ Abrir fonte desloca o inspetor em aproximadamente 140 ms e conserva a seleção 
 
 Respeitar movimento reduzido e não usar animações contínuas para sugerir atividade. Reorganização de largura e fixação de inspetor são persistidas por janela, com restaurar padrão. Em telas pequenas, voltar da fonte restaura o foco no arquivo que a abriu. Tema claro usa superfícies de papel e o mesmo acento cobre escurecido.
 
+## Living Systems no desktop F1
+
+A direção Living Systems usa Fraunces nos títulos de projeto e na Área de trabalho. IBM Plex Sans organiza títulos de seção, painéis e controles. Consolas distingue caminhos, branches e hashes. Noir, Astra e Quartz compartilham esses papéis, a escala de espaços e os estados semânticos.
+
+- **Visão geral.** O cabeçalho de projeto é compacto. O caminho do checkout pode ser aberto por teclado. A decisão vigente, sua evidência e a leitura Git têm precedência na composição. A próxima ação usa tipografia operacional e mantém o rótulo de sugestão.
+- **Contexto e Tarefas.** Busca e capturas ficam disponíveis na entrada de Contexto. A seleção de fontes e a verificação do provedor se expandem sob demanda. A lista e o detalhe da tarefa oferecem continuidade. Criar e editar abre um diálogo que devolve o foco ao controle de origem.
+- **Alterações Git.** A listagem da árvore de trabalho tem data e filtros pela leitura recebida. A captura preservada mantém origem própria e oferece seleção de arquivo, comparação por camada e digests consultáveis.
+- **Movimento.** O campo espectral mantém a fase na troca de projeto e usa uma ondulação curta na troca de seção. O render contínuo para fora da área visível, com pausa manual ou com a preferência de movimento reduzido.
+
+[Evidência da segunda passagem visual](../docs/planning/STATUS.md#ev-ui-02)
+
+## Living Systems 2.0 no desktop
+
+A estrutura parte da direção Cognitive Workspace. A exploração usou o mesmo checkout fictício nas três direções. Editorial Instrument contribuiu com a hierarquia da decisão. Living Systems Reimagined contribuiu com o campo espectral. As referências `LAPLACE_LIVING_SYSTEMS_PREVIEW.html` e Screenshot_120–131 orientaram a segunda passagem, com navegação contextual arredondada, superfícies em camadas, tarefas e relações em painéis de consulta.
+
+- **Navegação.** A lateral dá acesso à Área de trabalho, aos projetos, ao Laboratório e às Preferências. As abas Retomada, Contexto, Tarefas e Alterações Git pertencem ao checkout e aparecem sob seu cabeçalho. A paleta Ctrl+K reúne os destinos e as ações locais disponíveis. O destino atual tem indicação visual e semântica. Em janelas estreitas, a navegação usa o topo e o índice do Laboratório mantém os nove destinos acessíveis.
+- **Workspace.** Projetos e leituras datadas ocupam a coluna principal. Retomada, sinais do catálogo e ferramentas em prévia ocupam a lateral de apoio. As contagens usam registros do catálogo e observações disponíveis na sessão. No Cockpit, atividade, decisão e Git conservam sua proveniência. Tarefas recentes e links para fontes dão continuidade à leitura.
+- **Tipografia.** Fraunces para o nome do projeto e superfícies editoriais. Inter para leitura, controles e navegação. JetBrains Mono para arquivos, branches, hashes e código. As três fontes são locais e a interface usa escalas de 12 px para metadados, 14–15 px para controles e leitura e 19 px para títulos de painéis.
+- **Temas e movimento.** Noir combina carvão e cobre, Astra usa azul frio e ciano, Quartz usa papel e tinta quente. Fundo, superfície, realce, foco e estados usam tokens semânticos. A profundidade vem do aro, da diferença de tom e de sombras curtas. O campo espectral ocupa as áreas de identidade. A seleção do grafo realça relações por tipo e respeita movimento reduzido.
+
+| Componente | Variantes e estados |
+| --- | --- |
+| Shell, navegação, breadcrumbs e abas | Lateral no desktop e navegação no topo em largura reduzida. Projeto selecionado e destino atual com marca distinta. Ponteiro, teclado e foco visível. Breadcrumb com projeto e seção. |
+| Paleta, busca e filtros | Paleta fechada, aberta, com seleção por setas e sem resultados. Busca FTS por captura selecionada ou recente. Índice em leitura, atualizado ou indisponível. Filtros, paginação e resultados preservados. |
+| Toolbar e status | Ação primária, secundária, textual e desabilitada durante solicitação. Vínculo, disponibilidade, estado do serviço e proveniência têm rótulo textual. |
+| Projeto e atividade | Checkout com leitura datada ou sem leitura na sessão. Lista preenchida, vazia ou indisponível. Atividade usa as leituras e revisões disponíveis. |
+| Contexto, evidência e memória | Lista e inspetor. Captura, trecho, data, digest e cobertura. Lacuna explícita. Prova histórica, comparação e histórico de revisões. |
+| Árvore Git e diff | Observação viva e captura preservada. Filtros de estado, camadas HEAD → Índice e Índice → Disco, diff unificado e versões lado a lado. |
+| Tarefa e agente | Lista, filtro, detalhe e editor de tarefa. Tentativas Mock de desenvolvimento identificadas. Sessões do Laboratório com capacidade, tentativa, evidência e revisão simulada. |
+| Grafo e relações | Tipos Decisão, Fonte e Tarefa. Filtros, nó ativo, lista navegável e inspetor com origem. Acento e rótulos distinguem tipos e seleção. |
+| Diálogos e divulgações | Diálogo modal nativo para ações de entrada e edição. Resumo expansível para caminhos, procedência e manutenção. Títulos nativos ajudam a ler rótulos truncados. |
+| Prévia e estados | Identificação persistente do Laboratório. Cenários carregando, preenchido, vazio, falha com reabertura e indisponível. Alterações da demonstração vivem na sessão da tela. |
+
+### Integrações previstas
+
+| Fase | Próxima integração |
+| --- | --- |
+| F1 | Pilotar os fluxos existentes com o autor em projetos autorizados e concluir os aceites de distribuição. |
+| F2 | Ligar o manifesto e orçamento do Compilador ao ContextPackage, aos grants e à consulta com origem verificável. |
+| F3 | Ligar Memória e Inbox ao catálogo versionado, revisão humana, retenção e expurgo. Começar KGraph pela projeção de relações confirmadas e timeline. |
+| F4 | Ligar Pre-Flight, Planejador e Central às precondições, tentativas e revisão supervisionada. |
+| F5 | Ligar Arena a worktrees com base comparável e Replay ao histórico bitemporal disponível. |
+
+[Evidências de execução e limites](../docs/planning/STATUS.md#ev-ui-03) · [Roadmap F1–F5](../docs/planning/ROADMAP.md)
+
+
 ## Percurso para avaliar o protótipo
 
 1. Abrir o HTML depois de extrair o ZIP. Na Home, verificar como uma tarefa em revisão no NexTM convive com uma sessão ativa no Iuris. Os dados são ilustrativos.

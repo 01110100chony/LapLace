@@ -314,9 +314,9 @@ export function CodexQueryView({
   );
 
   return (
-    <section className="panel context-search" aria-labelledby="codex-query">
-      <div className="section-heading">
-        <h3 id="codex-query">Consultar com Codex</h3>
+    <section className="context-result" aria-labelledby="codex-query">
+      <div className="work-panel-heading">
+        <h3 id="codex-query">Disponibilidade e fontes</h3>
         <button
           className="button"
           onClick={check}
