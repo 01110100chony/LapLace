@@ -77,6 +77,17 @@ export const errorCodes = [
   "overlay_race_detected",
   "overlay_blob_missing",
   "overlay_unsafe_target",
+  "planner_invalid_input",
+  "planner_not_found",
+  "planner_drift_detected",
+  "planner_worktree_unavailable",
+  "operation_grant_invalid",
+  "operation_grant_expired",
+  "execution_backend_blocked",
+  "execution_interrupted",
+  "apply_not_approved",
+  "apply_conflict_detected",
+  "verifier_approval_invalid",
   "clone_unavailable",
   "clone_busy",
   ...cloneFailures,
@@ -125,6 +136,7 @@ export type Results = ContextResults &
   DecisionResults &
   CompilerResults &
   MemoryResults &
+  PlannerResults &
   CloneResults & {
     health: Health;
     "workspace.list": Catalog;
@@ -153,6 +165,7 @@ export type Request = Envelope &
     | DecisionRequests
     | CompilerRequests
     | MemoryRequests
+    | PlannerRequests
     | CloneRequests
   );
 export type Response<K extends Operation = Operation> =
@@ -208,6 +221,8 @@ export function parseRequest(value: unknown): Request | undefined {
   if (compiler) return { ...envelope, ...compiler };
   const memory = parseMemoryRequest(value);
   if (memory) return { ...envelope, ...memory };
+  const planner = parsePlannerRequest(value);
+  if (planner) return { ...envelope, ...planner };
   if (value.operation === "health") return { ...envelope, operation: "health" };
   if (value.operation === "workspace.list")
     return { ...envelope, operation: "workspace.list" };
@@ -390,6 +405,29 @@ export function isResponse<K extends Operation>(
   )
     return isMemoryResult(operation, value.data);
   if (
+    operation === "planner.explore" ||
+    operation === "planner.planCreate" ||
+    operation === "planner.planList" ||
+    operation === "planner.planPreflight" ||
+    operation === "planner.grantIssue" ||
+    operation === "planner.grantList" ||
+    operation === "planner.grantRevoke" ||
+    operation === "planner.boundaryStatus" ||
+    operation === "planner.executionStart" ||
+    operation === "planner.executionList" ||
+    operation === "planner.executionEvents" ||
+    operation === "planner.executionCancel" ||
+    operation === "planner.worktreeCleanup" ||
+    operation === "planner.diffGet" ||
+    operation === "planner.diffReview" ||
+    operation === "planner.applyLocal" ||
+    operation === "planner.verifierDefine" ||
+    operation === "planner.verifierList" ||
+    operation === "planner.verifierApprove" ||
+    operation === "planner.verifierRun"
+  )
+    return isPlannerResult(operation, value.data);
+  if (
     operation === "codex.status" ||
     operation === "codex.prepare" ||
     operation === "codex.approval" ||
@@ -504,3 +542,10 @@ import {
   type MemoryResults,
 } from "./memory.ts";
 export * from "./memory.ts";
+import {
+  isPlannerResult,
+  parsePlannerRequest,
+  type PlannerRequests,
+  type PlannerResults,
+} from "./planner.ts";
+export * from "./planner.ts";

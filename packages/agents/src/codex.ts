@@ -316,6 +316,78 @@ export function workspaceCodexExecArgs(
   return args;
 }
 
+export type SupervisedCodexMcpBinding = {
+  command: string;
+  gatewayScriptPath: string;
+  dataDir: string;
+  projectId: string;
+  bindingId: string;
+  worktreeId: string;
+  destinationId: string;
+  grantId: string;
+  sessionId: string;
+  manifestDigest: string;
+  policyVersion: string;
+};
+
+const supervisedSha256Pattern = /^[0-9a-f]{64}$/;
+
+export function supervisedCodexExecArgs(
+  cwd: string,
+  options: {
+    sandbox: "read-only" | "workspace-write";
+    mcpBinding: SupervisedCodexMcpBinding;
+  },
+): string[] {
+  const { sandbox, mcpBinding } = options;
+  if (
+    !mcpBinding.command.trim() ||
+    !mcpBinding.gatewayScriptPath.trim() ||
+    !mcpBinding.dataDir.trim() ||
+    !mcpBinding.projectId.trim() ||
+    !mcpBinding.bindingId.trim() ||
+    !mcpBinding.worktreeId.trim() ||
+    !mcpBinding.destinationId.trim() ||
+    !mcpBinding.grantId.trim() ||
+    !mcpBinding.sessionId.trim() ||
+    !supervisedSha256Pattern.test(mcpBinding.manifestDigest) ||
+    !mcpBinding.policyVersion.trim()
+  ) {
+    throw new Error("Invalid supervised Codex MCP binding");
+  }
+  const gatewayArgs = [
+    mcpBinding.gatewayScriptPath,
+    mcpBinding.dataDir,
+    "--grant",
+    mcpBinding.grantId,
+    "--session",
+    mcpBinding.sessionId,
+    "--project",
+    mcpBinding.projectId,
+    "--binding",
+    mcpBinding.bindingId,
+    "--worktree",
+    mcpBinding.worktreeId,
+    "--destination",
+    mcpBinding.destinationId,
+    "--manifest",
+    mcpBinding.manifestDigest,
+    "--policy",
+    mcpBinding.policyVersion,
+  ];
+  const args = workspaceCodexExecArgs(cwd, {
+    mcpGateway: {
+      command: mcpBinding.command,
+      args: gatewayArgs,
+    },
+  });
+  const sandboxIndex = args.indexOf("--sandbox");
+  if (sandboxIndex !== -1 && args[sandboxIndex + 1] === "read-only") {
+    args[sandboxIndex + 1] = sandbox;
+  }
+  return args;
+}
+
 export class CodexJsonl {
   private pending = Buffer.alloc(0);
   private bytes = 0;

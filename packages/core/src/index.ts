@@ -31,3 +31,20 @@ export {
   type PartialCorrectionPlan,
   type PartialCorrectionSegment,
 } from "./memory.ts";
+export {
+  computeDiffDigest,
+  computeGitBaseDigest,
+  computeVerifierDefinitionDigest,
+  evaluatePreFlight,
+  grantAllowsEffect,
+  simulateGitPlan,
+  validateVerifierApproval,
+  type DiffDigestFile,
+  type GitPlanSimulation,
+  type GitPlanSimulationInput,
+  type PlannerGitObservation,
+  type PreFlightEvaluation,
+  type PreFlightEvaluationInput,
+  type VerifierApprovalValidation,
+  type VerifierTuple,
+} from "./planner.ts";

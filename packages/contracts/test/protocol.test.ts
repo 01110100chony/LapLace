@@ -1428,3 +1428,320 @@ test("F3-T01.A1: valida todas as 22 operações memory.* e rejeita intervalos in
     ),
   );
 });
+
+test("F4 valida todas as 20 operacoes planner.* e rejeita cross-scope ou inputs invalidos", () => {
+  const f4Scope = {
+    projectId: "a".repeat(64),
+    bindingId: "1".repeat(64),
+    worktreeId: "2".repeat(64),
+  };
+  const crossScope = {
+    projectId: "b".repeat(64),
+    bindingId: "3".repeat(64),
+    worktreeId: "4".repeat(64),
+  };
+  const sha = "c".repeat(64);
+  const oid = "1".repeat(40);
+  const now = "2026-11-23T12:00:00.000Z";
+  const base = {
+    head: oid,
+    branch: "main",
+    indexStamp: "idx-100",
+    worktreeRoot: "C:\\Repo",
+    dirtyDigest: sha,
+  };
+
+  const validRequests = [
+    {
+      ...envelope,
+      operation: "planner.explore",
+      ...f4Scope,
+      watchedPaths: ["README.md"],
+    },
+    {
+      ...envelope,
+      operation: "planner.planCreate",
+      ...f4Scope,
+      requestId: "req-plan-1",
+      title: "Editar README",
+      objective: "Atualizar secao F4",
+      operationKind: "worktree_edit",
+      backendMode: "mock_supervised",
+      targetBranch: null,
+      targetPaths: ["README.md"],
+      proposedEdits: [{ path: "README.md", action: "modify", content: "ok\n" }],
+    },
+    { ...envelope, operation: "planner.planList", ...f4Scope },
+    {
+      ...envelope,
+      operation: "planner.planPreflight",
+      ...f4Scope,
+      planId: "plan-1",
+    },
+    {
+      ...envelope,
+      operation: "planner.grantIssue",
+      ...f4Scope,
+      planId: "plan-1",
+      expectedBaseDigest: sha,
+      backendMode: "mock_supervised",
+      allowedEffects: ["create_worktree", "write_worktree"],
+      ttlMs: 60_000,
+      humanConfirmed: true,
+    },
+    {
+      ...envelope,
+      operation: "planner.grantList",
+      ...f4Scope,
+      planId: "plan-1",
+    },
+    {
+      ...envelope,
+      operation: "planner.grantRevoke",
+      ...f4Scope,
+      grantId: "grant-1",
+      reason: "manual",
+    },
+    { ...envelope, operation: "planner.boundaryStatus", ...f4Scope },
+    {
+      ...envelope,
+      operation: "planner.executionStart",
+      ...f4Scope,
+      requestId: "req-exec-1",
+      planId: "plan-1",
+      grantId: "grant-1",
+      expectedBaseDigest: sha,
+      mockBehavior: "complete",
+    },
+    { ...envelope, operation: "planner.executionList", ...f4Scope },
+    {
+      ...envelope,
+      operation: "planner.executionEvents",
+      ...f4Scope,
+      executionId: "exec-1",
+      afterSeq: 0,
+    },
+    {
+      ...envelope,
+      operation: "planner.executionCancel",
+      ...f4Scope,
+      executionId: "exec-1",
+      humanConfirmed: true,
+    },
+    {
+      ...envelope,
+      operation: "planner.worktreeCleanup",
+      ...f4Scope,
+      executionId: "exec-1",
+      humanConfirmed: true,
+    },
+    {
+      ...envelope,
+      operation: "planner.diffGet",
+      ...f4Scope,
+      executionId: "exec-1",
+    },
+    {
+      ...envelope,
+      operation: "planner.diffReview",
+      ...f4Scope,
+      requestId: "req-rev-1",
+      executionId: "exec-1",
+      expectedDiffDigest: sha,
+      expectedRevision: 0,
+      choice: "approved",
+      reviewer: "operador",
+      note: "Conferido",
+      humanConfirmed: true,
+    },
+    {
+      ...envelope,
+      operation: "planner.applyLocal",
+      ...f4Scope,
+      requestId: "req-apply-1",
+      executionId: "exec-1",
+      grantId: "grant-1",
+      expectedDiffDigest: sha,
+      applyConfirmed: true,
+    },
+    {
+      ...envelope,
+      operation: "planner.verifierDefine",
+      ...f4Scope,
+      definitionId: "verif-node",
+      label: "Node version",
+      argv: ["node", "--version"],
+      cwdRelative: ".",
+      envWhitelist: ["NODE_ENV"],
+      timeoutMs: 5_000,
+      privilegeProfile: "readonly_check",
+    },
+    { ...envelope, operation: "planner.verifierList", ...f4Scope },
+    {
+      ...envelope,
+      operation: "planner.verifierApprove",
+      ...f4Scope,
+      definitionId: "verif-node",
+      expectedDefinitionDigest: sha,
+      reviewer: "operador",
+      humanConfirmed: true,
+    },
+    {
+      ...envelope,
+      operation: "planner.verifierRun",
+      ...f4Scope,
+      requestId: "req-vrun-1",
+      definitionId: "verif-node",
+      expectedDefinitionDigest: sha,
+      executionId: "exec-1",
+    },
+  ];
+
+  for (const req of validRequests) {
+    assert.ok(parseRequest(req), `parseRequest failed for ${req.operation}`);
+  }
+
+  // Rejeita caminhos com traversal ou NUL e comandos sem argv
+  assert.equal(
+    parseRequest({
+      ...envelope,
+      operation: "planner.explore",
+      ...f4Scope,
+      watchedPaths: ["../segredo.txt"],
+    }),
+    undefined,
+  );
+  assert.equal(
+    parseRequest({
+      ...envelope,
+      operation: "planner.verifierDefine",
+      ...f4Scope,
+      definitionId: "verif-empty",
+      label: "Invalido",
+      argv: [],
+      cwdRelative: ".",
+      envWhitelist: [],
+      timeoutMs: 5_000,
+      privilegeProfile: "readonly_check",
+    }),
+    undefined,
+  );
+
+  const validResponses: Array<[string, unknown]> = [
+    [
+      "planner.explore",
+      {
+        scope: f4Scope,
+        observedAt: now,
+        base,
+        branches: [{ name: "main", head: oid, current: true }],
+        worktrees: [
+          { root: "C:\\Repo", head: oid, branch: "main", isMain: true },
+        ],
+        dirtyPaths: [],
+        conflictedPaths: [],
+        changesCount: { staged: 0, unstaged: 0, untracked: 0, conflicted: 0 },
+        dedicatedWorktreeCount: 0,
+      },
+    ],
+    [
+      "planner.boundaryStatus",
+      {
+        scope: f4Scope,
+        checkedAt: now,
+        lpacVerified: false,
+        lpacDetail: "0xc0000142",
+        strictBackendAllowed: false,
+        supervisionHelperAvailable: true,
+        backends: [
+          {
+            mode: "mock_supervised",
+            available: true,
+            verified: false,
+            blockedReason: null,
+          },
+          {
+            mode: "codex_cli_isolated",
+            available: false,
+            verified: false,
+            blockedReason: "lpac_blocked",
+          },
+        ],
+      },
+    ],
+    [
+      "planner.verifierApprove",
+      {
+        scope: f4Scope,
+        definitionId: "verif-node",
+        label: "Node",
+        argv: ["node", "--version"],
+        cwdRelative: ".",
+        envWhitelist: ["NODE_ENV"],
+        timeoutMs: 5_000,
+        privilegeProfile: "readonly_check",
+        definitionDigest: sha,
+        approvalStatus: "approved",
+        approvedDigest: sha,
+        approvedBy: "operador",
+        approvedAt: now,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
+  ];
+
+  for (const [op, data] of validResponses) {
+    assert.ok(
+      isResponse(
+        { ...envelope, ok: true, operation: op, data },
+        envelope.id,
+        op,
+      ),
+      op,
+    );
+  }
+
+  // Rejeita vazamento cross-scope na lista de planos
+  assert.ok(
+    !isResponse(
+      {
+        ...envelope,
+        ok: true,
+        operation: "planner.planList",
+        data: {
+          scope: f4Scope,
+          items: [
+            {
+              scope: crossScope,
+              planId: "plan-cross",
+              requestId: "req-1",
+              title: "X",
+              objective: "Y",
+              operationKind: "worktree_edit",
+              backendMode: "mock_supervised",
+              targetBranch: null,
+              targetPaths: ["README.md"],
+              proposedEdits: [],
+              sessionGrantId: null,
+              base,
+              baseDigest: sha,
+              riskLevel: "low",
+              status: "ready",
+              preflightStatus: "valid",
+              predictedEffects: [],
+              conflicts: [],
+              preconditions: [],
+              simulationDigest: sha,
+              mutatesOrigin: false,
+              createdAt: now,
+              updatedAt: now,
+            },
+          ],
+        },
+      },
+      envelope.id,
+      "planner.planList",
+    ),
+  );
+});

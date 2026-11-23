@@ -13,6 +13,7 @@ import {
   CodexJsonl,
   detectCodex,
   runCodex,
+  supervisedCodexExecArgs,
   workspaceCodexExecArgs,
   type CodexRunEvent,
   type VerifiedCodexBoundary,
@@ -230,5 +231,63 @@ test("supervises a child with no shell and distinguishes end states", async () =
     (await ask(`console.log('x'.repeat(${codexMaxLineBytes + 1}))`)).terminal
       .failure,
     "output_limit",
+  );
+});
+
+test("supervisedCodexExecArgs preserves F2 default and injects bound mcp-gateway only for F4", () => {
+  const baseline = codexExecArgs("fixture");
+  assert.ok(baseline.includes("mcp_servers={}"));
+  assert.equal(baseline[baseline.indexOf("--sandbox") + 1], "read-only");
+
+  const args = supervisedCodexExecArgs("C:\\Worktree\\ded", {
+    sandbox: "workspace-write",
+    mcpBinding: {
+      command: "C:\\Laplace\\laplace-node.exe",
+      gatewayScriptPath: "C:\\Laplace\\sidecar\\mcp-gateway.cjs",
+      dataDir: "C:\\Data",
+      projectId: "a".repeat(64),
+      bindingId: "bind-1",
+      worktreeId: "wt-1",
+      destinationId: "codex-worktree",
+      grantId: "grant-1",
+      sessionId: "sess-1",
+      manifestDigest: "b".repeat(64),
+      policyVersion: "1",
+    },
+  });
+
+  assert.equal(args[args.indexOf("--sandbox") + 1], "workspace-write");
+  assert.ok(!args.includes("mcp_servers={}"));
+  assert.ok(args.includes("--strict-config"));
+  assert.ok(args.includes("--ignore-user-config"));
+  assert.ok(args.includes('web_search="disabled"'));
+  assert.ok(args.includes("mcp_servers.laplace.enabled=true"));
+  const gatewayArgsEntry = args.find((item) =>
+    item.startsWith("mcp_servers.laplace.args="),
+  );
+  assert.ok(gatewayArgsEntry);
+  assert.ok(gatewayArgsEntry.includes("grant-1"));
+  assert.ok(gatewayArgsEntry.includes("sess-1"));
+  assert.ok(gatewayArgsEntry.includes("b".repeat(64)));
+
+  assert.throws(
+    () =>
+      supervisedCodexExecArgs("C:\\Worktree\\ded", {
+        sandbox: "workspace-write",
+        mcpBinding: {
+          command: "C:\\Laplace\\laplace-node.exe",
+          gatewayScriptPath: "C:\\Laplace\\sidecar\\mcp-gateway.cjs",
+          dataDir: "C:\\Data",
+          projectId: "a".repeat(64),
+          bindingId: "bind-1",
+          worktreeId: "wt-1",
+          destinationId: "codex-worktree",
+          grantId: "grant-1",
+          sessionId: "sess-1",
+          manifestDigest: "not-a-sha256",
+          policyVersion: "1",
+        },
+      }),
+    /Invalid supervised Codex MCP binding/,
   );
 });
