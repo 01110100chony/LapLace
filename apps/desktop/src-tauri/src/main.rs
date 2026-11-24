@@ -3,8 +3,9 @@
 mod ipc;
 
 use ipc::{
-    CodexMode, CodexRequest, CompilerRequest, ErrorCode, Fault, MemoryRequest, Operation,
-    PlannerRequest, Response, ResumeRequest, SearchScope, Sidecar, TaskRequest, WorkingRequest,
+    CodexMode, CodexRequest, CompilerRequest, ErrorCode, Fault, IntelligenceRequest, MemoryRequest,
+    Operation, PlannerRequest, Response, ResumeRequest, SearchScope, Sidecar, TaskRequest,
+    WorkingRequest,
 };
 use tauri::{path::BaseDirectory, Manager, RunEvent, State, WebviewWindow};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
@@ -446,6 +447,17 @@ async fn planner_request(
 }
 
 #[tauri::command]
+async fn intelligence_request(
+    id: String,
+    request: IntelligenceRequest,
+    sidecar: State<'_, Sidecar>,
+) -> Result<Response, Fault> {
+    Ok(sidecar
+        .request(id, Operation::Intelligence(&request))
+        .await?)
+}
+
+#[tauri::command]
 async fn codex_request(
     id: String,
     mut request: CodexRequest,
@@ -568,7 +580,8 @@ fn main() {
             resume_request,
             compiler_request,
             memory_request,
-            planner_request
+            planner_request,
+            intelligence_request
         ])
         .build(tauri::generate_context!())
         .expect("falha ao inicializar a janela do Laplace");

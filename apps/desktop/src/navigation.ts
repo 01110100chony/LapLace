@@ -6,6 +6,7 @@ export const projectDestinations = [
   { id: "memory", label: "Memória", icon: "archive" },
   { id: "tasks", label: "Tarefas", icon: "tasks" },
   { id: "planner", label: "Supervisão", icon: "agent" },
+  { id: "intelligence", label: "Inteligência", icon: "split" },
   { id: "working", label: "Alterações Git", icon: "git" },
 ] as const satisfies readonly { id: string; label: string; icon: IconName }[];
 

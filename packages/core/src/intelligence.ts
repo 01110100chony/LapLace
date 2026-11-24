@@ -10,7 +10,6 @@ import {
   type ArenaInvalidationReason,
   type ArenaPairedReview,
   type ArenaSessionStatus,
-  type BkmCategory,
   type BkmEvidenceRecord,
   type BkmHypothesisRecord,
   type BkmHypothesisState,

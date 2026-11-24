@@ -100,6 +100,16 @@ pub enum ErrorCode {
     CloneBusy,
     CloneDestinationExists,
     CloneDestinationChanged,
+    IntelligenceInvalidInput,
+    IntelligenceNotFound,
+    ArenaBaseDivergence,
+    ArenaReviewIncomplete,
+    ArenaSessionInvalidated,
+    ReplayInvalidRange,
+    LearningHypothesisConflict,
+    AdaptiveGateRejected,
+    ProactivityOptInRequired,
+    ProactivityScheduleConflict,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -451,6 +461,46 @@ enum Payload {
     PlannerVerifierApprove(ScopePayload),
     #[serde(rename = "planner.verifierRun")]
     PlannerVerifierRun(ScopePayload),
+    #[serde(rename = "arena.sessionCreate")]
+    ArenaSessionCreate(ScopePayload),
+    #[serde(rename = "arena.sessionRun")]
+    ArenaSessionRun(ScopePayload),
+    #[serde(rename = "arena.sessionList")]
+    ArenaSessionList(ScopePayload),
+    #[serde(rename = "arena.sessionGet")]
+    ArenaSessionGet(ScopePayload),
+    #[serde(rename = "arena.sessionReview")]
+    ArenaSessionReview(ScopePayload),
+    #[serde(rename = "replay.query")]
+    ReplayQuery(ScopePayload),
+    #[serde(rename = "replay.diff")]
+    ReplayDiff(ScopePayload),
+    #[serde(rename = "replay.deliveryInspect")]
+    ReplayDeliveryInspect(ScopePayload),
+    #[serde(rename = "learning.hypothesisUpsert")]
+    LearningHypothesisUpsert(ScopePayload),
+    #[serde(rename = "learning.hypothesisList")]
+    LearningHypothesisList(ScopePayload),
+    #[serde(rename = "learning.hypothesisTransition")]
+    LearningHypothesisTransition(ScopePayload),
+    #[serde(rename = "learning.evaluateAdaptive")]
+    LearningEvaluateAdaptive(ScopePayload),
+    #[serde(rename = "learning.strategyActivate")]
+    LearningStrategyActivate(ScopePayload),
+    #[serde(rename = "learning.strategyStatus")]
+    LearningStrategyStatus(ScopePayload),
+    #[serde(rename = "proactivity.evaluate")]
+    ProactivityEvaluate(ScopePayload),
+    #[serde(rename = "proactivity.suggestionList")]
+    ProactivitySuggestionList(ScopePayload),
+    #[serde(rename = "proactivity.suggestionRespond")]
+    ProactivitySuggestionRespond(ScopePayload),
+    #[serde(rename = "proactivity.scheduleUpsert")]
+    ProactivityScheduleUpsert(ScopePayload),
+    #[serde(rename = "proactivity.scheduleList")]
+    ProactivityScheduleList(ScopePayload),
+    #[serde(rename = "proactivity.scheduleControl")]
+    ProactivityScheduleControl(ScopePayload),
 }
 
 impl Payload {
@@ -558,6 +608,26 @@ impl Payload {
             Self::PlannerVerifierList(_) => "planner.verifierList",
             Self::PlannerVerifierApprove(_) => "planner.verifierApprove",
             Self::PlannerVerifierRun(_) => "planner.verifierRun",
+            Self::ArenaSessionCreate(_) => "arena.sessionCreate",
+            Self::ArenaSessionRun(_) => "arena.sessionRun",
+            Self::ArenaSessionList(_) => "arena.sessionList",
+            Self::ArenaSessionGet(_) => "arena.sessionGet",
+            Self::ArenaSessionReview(_) => "arena.sessionReview",
+            Self::ReplayQuery(_) => "replay.query",
+            Self::ReplayDiff(_) => "replay.diff",
+            Self::ReplayDeliveryInspect(_) => "replay.deliveryInspect",
+            Self::LearningHypothesisUpsert(_) => "learning.hypothesisUpsert",
+            Self::LearningHypothesisList(_) => "learning.hypothesisList",
+            Self::LearningHypothesisTransition(_) => "learning.hypothesisTransition",
+            Self::LearningEvaluateAdaptive(_) => "learning.evaluateAdaptive",
+            Self::LearningStrategyActivate(_) => "learning.strategyActivate",
+            Self::LearningStrategyStatus(_) => "learning.strategyStatus",
+            Self::ProactivityEvaluate(_) => "proactivity.evaluate",
+            Self::ProactivitySuggestionList(_) => "proactivity.suggestionList",
+            Self::ProactivitySuggestionRespond(_) => "proactivity.suggestionRespond",
+            Self::ProactivityScheduleUpsert(_) => "proactivity.scheduleUpsert",
+            Self::ProactivityScheduleList(_) => "proactivity.scheduleList",
+            Self::ProactivityScheduleControl(_) => "proactivity.scheduleControl",
         }
     }
 
@@ -666,7 +736,27 @@ impl Payload {
             | Self::PlannerVerifierDefine(data)
             | Self::PlannerVerifierList(data)
             | Self::PlannerVerifierApprove(data)
-            | Self::PlannerVerifierRun(data) => data.scope.valid(),
+            | Self::PlannerVerifierRun(data)
+            | Self::ArenaSessionCreate(data)
+            | Self::ArenaSessionRun(data)
+            | Self::ArenaSessionList(data)
+            | Self::ArenaSessionGet(data)
+            | Self::ArenaSessionReview(data)
+            | Self::ReplayQuery(data)
+            | Self::ReplayDiff(data)
+            | Self::ReplayDeliveryInspect(data)
+            | Self::LearningHypothesisUpsert(data)
+            | Self::LearningHypothesisList(data)
+            | Self::LearningHypothesisTransition(data)
+            | Self::LearningEvaluateAdaptive(data)
+            | Self::LearningStrategyActivate(data)
+            | Self::LearningStrategyStatus(data)
+            | Self::ProactivityEvaluate(data)
+            | Self::ProactivitySuggestionList(data)
+            | Self::ProactivitySuggestionRespond(data)
+            | Self::ProactivityScheduleUpsert(data)
+            | Self::ProactivityScheduleList(data)
+            | Self::ProactivityScheduleControl(data) => data.scope.valid(),
             Self::ContextSearch(data) => {
                 valid_project_id(&data.project_id)
                     && data.context_id.as_deref().is_none_or(valid_project_id)
@@ -804,7 +894,27 @@ impl Response {
                                 | Payload::PlannerVerifierDefine(data)
                                 | Payload::PlannerVerifierList(data)
                                 | Payload::PlannerVerifierApprove(data)
-                                | Payload::PlannerVerifierRun(data),
+                                | Payload::PlannerVerifierRun(data)
+                                | Payload::ArenaSessionCreate(data)
+                                | Payload::ArenaSessionRun(data)
+                                | Payload::ArenaSessionList(data)
+                                | Payload::ArenaSessionGet(data)
+                                | Payload::ArenaSessionReview(data)
+                                | Payload::ReplayQuery(data)
+                                | Payload::ReplayDiff(data)
+                                | Payload::ReplayDeliveryInspect(data)
+                                | Payload::LearningHypothesisUpsert(data)
+                                | Payload::LearningHypothesisList(data)
+                                | Payload::LearningHypothesisTransition(data)
+                                | Payload::LearningEvaluateAdaptive(data)
+                                | Payload::LearningStrategyActivate(data)
+                                | Payload::LearningStrategyStatus(data)
+                                | Payload::ProactivityEvaluate(data)
+                                | Payload::ProactivitySuggestionList(data)
+                                | Payload::ProactivitySuggestionRespond(data)
+                                | Payload::ProactivityScheduleUpsert(data)
+                                | Payload::ProactivityScheduleList(data)
+                                | Payload::ProactivityScheduleControl(data),
                             ) => {
                                 data.scope.project_id == pid
                                     && data.scope.binding_id == bid
@@ -985,6 +1095,8 @@ pub enum Operation<'a> {
     Memory(&'a MemoryRequest),
     #[serde(untagged)]
     Planner(&'a PlannerRequest),
+    #[serde(untagged)]
+    Intelligence(&'a IntelligenceRequest),
 }
 
 #[derive(Deserialize, Serialize)]
@@ -2581,6 +2693,394 @@ impl PlannerRequest {
     }
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(
+    tag = "operation",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum IntelligenceRequest {
+    #[serde(rename = "arena.sessionCreate")]
+    ArenaSessionCreate {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        request_id: String,
+        title: String,
+        objective: String,
+        backend_mode: String,
+        criteria: serde_json::Value,
+        hypotheses: serde_json::Value,
+        human_confirmed: bool,
+    },
+    #[serde(rename = "arena.sessionRun")]
+    ArenaSessionRun {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        session_id: String,
+        human_confirmed: bool,
+    },
+    #[serde(rename = "arena.sessionList")]
+    ArenaSessionList {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+    },
+    #[serde(rename = "arena.sessionGet")]
+    ArenaSessionGet {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        session_id: String,
+    },
+    #[serde(rename = "arena.sessionReview")]
+    ArenaSessionReview {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        session_id: String,
+        request_id: String,
+        outcome: String,
+        winner_hypothesis_id: Option<String>,
+        reviewer: String,
+        rationale: String,
+        reviewed_hypothesis_ids: Vec<String>,
+        criterion_scores: serde_json::Value,
+        evidence_refs: Vec<String>,
+        human_confirmed: bool,
+    },
+    #[serde(rename = "replay.query")]
+    ReplayQuery {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        valid_at: String,
+        known_at: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        signal_kinds: Option<Vec<String>>,
+    },
+    #[serde(rename = "replay.diff")]
+    ReplayDiff {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        point_a: serde_json::Value,
+        point_b: serde_json::Value,
+    },
+    #[serde(rename = "replay.deliveryInspect")]
+    ReplayDeliveryInspect {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        manifest_digest: String,
+        known_at: String,
+    },
+    #[serde(rename = "learning.hypothesisUpsert")]
+    LearningHypothesisUpsert {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        request_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        hypothesis_id: Option<String>,
+        competing_group_key: String,
+        category: String,
+        title: String,
+        statement: String,
+        pattern: serde_json::Value,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        evidence: Option<serde_json::Value>,
+    },
+    #[serde(rename = "learning.hypothesisList")]
+    LearningHypothesisList {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+    },
+    #[serde(rename = "learning.hypothesisTransition")]
+    LearningHypothesisTransition {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        hypothesis_id: String,
+        to_state: String,
+        reason: String,
+        reviewer: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        supersede_competitors: Option<bool>,
+        human_confirmed: bool,
+    },
+    #[serde(rename = "learning.evaluateAdaptive")]
+    LearningEvaluateAdaptive {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        request_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        strategy_version: Option<String>,
+        split_boundary_at: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        min_recall_gain: Option<f64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        max_compute_cost_ms: Option<f64>,
+        held_out_cases: serde_json::Value,
+    },
+    #[serde(rename = "learning.strategyActivate")]
+    LearningStrategyActivate {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        mode: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        evaluation_id: Option<String>,
+        reviewer: String,
+        reason: String,
+        human_confirmed: bool,
+    },
+    #[serde(rename = "learning.strategyStatus")]
+    LearningStrategyStatus {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+    },
+    #[serde(rename = "proactivity.evaluate")]
+    ProactivityEvaluate {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+    },
+    #[serde(rename = "proactivity.suggestionList")]
+    ProactivitySuggestionList {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+    },
+    #[serde(rename = "proactivity.suggestionRespond")]
+    ProactivitySuggestionRespond {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        suggestion_id: String,
+        action: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        snooze_until: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
+    #[serde(rename = "proactivity.scheduleUpsert")]
+    ProactivityScheduleUpsert {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        schedule_id: Option<String>,
+        label: String,
+        opt_in_confirmed: bool,
+        window_start_utc: String,
+        window_end_utc: String,
+        allowed_days_utc: Vec<u8>,
+        min_interval_minutes: u32,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        app_closed_mode: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        run_when_app_closed: Option<bool>,
+    },
+    #[serde(rename = "proactivity.scheduleList")]
+    ProactivityScheduleList {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+    },
+    #[serde(rename = "proactivity.scheduleControl")]
+    ProactivityScheduleControl {
+        project_id: String,
+        binding_id: String,
+        worktree_id: String,
+        schedule_id: String,
+        action: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        evaluated_at: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        run_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        human_confirmed: Option<bool>,
+    },
+}
+
+impl IntelligenceRequest {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::ArenaSessionCreate { .. } => "arena.sessionCreate",
+            Self::ArenaSessionRun { .. } => "arena.sessionRun",
+            Self::ArenaSessionList { .. } => "arena.sessionList",
+            Self::ArenaSessionGet { .. } => "arena.sessionGet",
+            Self::ArenaSessionReview { .. } => "arena.sessionReview",
+            Self::ReplayQuery { .. } => "replay.query",
+            Self::ReplayDiff { .. } => "replay.diff",
+            Self::ReplayDeliveryInspect { .. } => "replay.deliveryInspect",
+            Self::LearningHypothesisUpsert { .. } => "learning.hypothesisUpsert",
+            Self::LearningHypothesisList { .. } => "learning.hypothesisList",
+            Self::LearningHypothesisTransition { .. } => "learning.hypothesisTransition",
+            Self::LearningEvaluateAdaptive { .. } => "learning.evaluateAdaptive",
+            Self::LearningStrategyActivate { .. } => "learning.strategyActivate",
+            Self::LearningStrategyStatus { .. } => "learning.strategyStatus",
+            Self::ProactivityEvaluate { .. } => "proactivity.evaluate",
+            Self::ProactivitySuggestionList { .. } => "proactivity.suggestionList",
+            Self::ProactivitySuggestionRespond { .. } => "proactivity.suggestionRespond",
+            Self::ProactivityScheduleUpsert { .. } => "proactivity.scheduleUpsert",
+            Self::ProactivityScheduleList { .. } => "proactivity.scheduleList",
+            Self::ProactivityScheduleControl { .. } => "proactivity.scheduleControl",
+        }
+    }
+
+    fn project_id(&self) -> &str {
+        match self {
+            Self::ArenaSessionCreate { project_id, .. }
+            | Self::ArenaSessionRun { project_id, .. }
+            | Self::ArenaSessionList { project_id, .. }
+            | Self::ArenaSessionGet { project_id, .. }
+            | Self::ArenaSessionReview { project_id, .. }
+            | Self::ReplayQuery { project_id, .. }
+            | Self::ReplayDiff { project_id, .. }
+            | Self::ReplayDeliveryInspect { project_id, .. }
+            | Self::LearningHypothesisUpsert { project_id, .. }
+            | Self::LearningHypothesisList { project_id, .. }
+            | Self::LearningHypothesisTransition { project_id, .. }
+            | Self::LearningEvaluateAdaptive { project_id, .. }
+            | Self::LearningStrategyActivate { project_id, .. }
+            | Self::LearningStrategyStatus { project_id, .. }
+            | Self::ProactivityEvaluate { project_id, .. }
+            | Self::ProactivitySuggestionList { project_id, .. }
+            | Self::ProactivitySuggestionRespond { project_id, .. }
+            | Self::ProactivityScheduleUpsert { project_id, .. }
+            | Self::ProactivityScheduleList { project_id, .. }
+            | Self::ProactivityScheduleControl { project_id, .. } => project_id,
+        }
+    }
+
+    fn scope(&self) -> (&str, &str, &str) {
+        match self {
+            Self::ArenaSessionCreate {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::ArenaSessionRun {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::ArenaSessionList {
+                project_id,
+                binding_id,
+                worktree_id,
+            }
+            | Self::ArenaSessionGet {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::ArenaSessionReview {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::ReplayQuery {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::ReplayDiff {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::ReplayDeliveryInspect {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::LearningHypothesisUpsert {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::LearningHypothesisList {
+                project_id,
+                binding_id,
+                worktree_id,
+            }
+            | Self::LearningHypothesisTransition {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::LearningEvaluateAdaptive {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::LearningStrategyActivate {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::LearningStrategyStatus {
+                project_id,
+                binding_id,
+                worktree_id,
+            }
+            | Self::ProactivityEvaluate {
+                project_id,
+                binding_id,
+                worktree_id,
+            }
+            | Self::ProactivitySuggestionList {
+                project_id,
+                binding_id,
+                worktree_id,
+            }
+            | Self::ProactivitySuggestionRespond {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::ProactivityScheduleUpsert {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            }
+            | Self::ProactivityScheduleList {
+                project_id,
+                binding_id,
+                worktree_id,
+            }
+            | Self::ProactivityScheduleControl {
+                project_id,
+                binding_id,
+                worktree_id,
+                ..
+            } => (project_id, binding_id, worktree_id),
+        }
+    }
+}
+
 impl<'a> Operation<'a> {
     fn name(self) -> &'static str {
         match self {
@@ -2610,6 +3110,7 @@ impl<'a> Operation<'a> {
             Self::Compiler(request) => request.name(),
             Self::Memory(request) => request.name(),
             Self::Planner(request) => request.name(),
+            Self::Intelligence(request) => request.name(),
         }
     }
 
@@ -2634,6 +3135,7 @@ impl<'a> Operation<'a> {
             Self::Compiler(request) => Some(request.project_id()),
             Self::Memory(request) => Some(request.project_id()),
             Self::Planner(request) => Some(request.project_id()),
+            Self::Intelligence(request) => Some(request.project_id()),
             _ => None,
         }
     }
@@ -2644,6 +3146,7 @@ impl<'a> Operation<'a> {
             Self::Compiler(request) => Some(request.scope()),
             Self::Memory(request) => Some(request.scope()),
             Self::Planner(request) => Some(request.scope()),
+            Self::Intelligence(request) => Some(request.scope()),
             _ => None,
         }
     }
@@ -2834,6 +3337,7 @@ impl Sidecar {
         let request_timeout = if matches!(
             operation,
             Operation::Planner(PlannerRequest::VerifierRun { .. })
+                | Operation::Intelligence(IntelligenceRequest::ArenaSessionRun { .. })
         ) {
             Duration::from_secs(125)
         } else {
@@ -4045,6 +4549,311 @@ mod resume_tests {
             .unwrap();
             assert!(
                 !bad_resp.matches("plan-1", op),
+                "{op_name} must reject swapped worktreeId"
+            );
+        }
+    }
+
+    #[test]
+    fn all_intelligence_variants_round_trip_and_match_scope() {
+        let project_id = "1".repeat(64);
+        let binding_id = "2".repeat(64);
+        let worktree_id = "3".repeat(64);
+        let other_id = "4".repeat(64);
+        let sha256 = "b".repeat(64);
+        let scope_json = || {
+            serde_json::json!({
+                "projectId": project_id,
+                "bindingId": binding_id,
+                "worktreeId": worktree_id
+            })
+        };
+
+        let cases: Vec<(&str, serde_json::Value)> = vec![
+            (
+                "arena.sessionCreate",
+                serde_json::json!({
+                    "operation": "arena.sessionCreate",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "requestId": "req-arena-1",
+                    "title": "Arena 1",
+                    "objective": "Comparar opcoes",
+                    "backendMode": "mock_supervised",
+                    "criteria": {
+                        "sharedObjective": "Comparar opcoes",
+                        "items": [{ "criterionId": "c1", "label": "C1", "weight": 1 }]
+                    },
+                    "hypotheses": [
+                        { "hypothesisId": "h1", "label": "H1", "summary": "S1", "targetPaths": ["a.txt"] },
+                        { "hypothesisId": "h2", "label": "H2", "summary": "S2", "targetPaths": ["b.txt"] }
+                    ],
+                    "humanConfirmed": true
+                }),
+            ),
+            (
+                "arena.sessionRun",
+                serde_json::json!({
+                    "operation": "arena.sessionRun",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "sessionId": "sess-1",
+                    "humanConfirmed": true
+                }),
+            ),
+            (
+                "arena.sessionList",
+                serde_json::json!({
+                    "operation": "arena.sessionList",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id
+                }),
+            ),
+            (
+                "arena.sessionGet",
+                serde_json::json!({
+                    "operation": "arena.sessionGet",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "sessionId": "sess-1"
+                }),
+            ),
+            (
+                "arena.sessionReview",
+                serde_json::json!({
+                    "operation": "arena.sessionReview",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "sessionId": "sess-1",
+                    "requestId": "req-rev-1",
+                    "outcome": "winner_selected",
+                    "winnerHypothesisId": "h1",
+                    "reviewer": "operador",
+                    "rationale": "Melhor diff",
+                    "reviewedHypothesisIds": ["h1", "h2"],
+                    "criterionScores": [{ "hypothesisId": "h1", "criterionId": "c1", "score": 5 }],
+                    "evidenceRefs": ["diff-1"],
+                    "humanConfirmed": true
+                }),
+            ),
+            (
+                "replay.query",
+                serde_json::json!({
+                    "operation": "replay.query",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "validAt": "2026-02-01T00:00:00.000Z",
+                    "knownAt": "2026-03-01T00:00:00.000Z"
+                }),
+            ),
+            (
+                "replay.diff",
+                serde_json::json!({
+                    "operation": "replay.diff",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "pointA": { "validAt": "2026-02-01T00:00:00.000Z", "knownAt": "2026-03-01T00:00:00.000Z" },
+                    "pointB": { "validAt": "2026-02-15T00:00:00.000Z", "knownAt": "2026-03-10T00:00:00.000Z" }
+                }),
+            ),
+            (
+                "replay.deliveryInspect",
+                serde_json::json!({
+                    "operation": "replay.deliveryInspect",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "manifestDigest": sha256,
+                    "knownAt": "2026-03-01T00:00:00.000Z"
+                }),
+            ),
+            (
+                "learning.hypothesisUpsert",
+                serde_json::json!({
+                    "operation": "learning.hypothesisUpsert",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "requestId": "req-bkm-1",
+                    "competingGroupKey": "auth-group",
+                    "category": "retrieval_boost",
+                    "title": "Regra BKM",
+                    "statement": "Priorizar auth",
+                    "pattern": { "keywords": ["token"], "pathPrefixes": ["docs/"], "boostWeight": 2.0, "preferCanonical": true, "preferRecent": true }
+                }),
+            ),
+            (
+                "learning.hypothesisList",
+                serde_json::json!({
+                    "operation": "learning.hypothesisList",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id
+                }),
+            ),
+            (
+                "learning.hypothesisTransition",
+                serde_json::json!({
+                    "operation": "learning.hypothesisTransition",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "hypothesisId": "bkm-1",
+                    "toState": "active",
+                    "reason": "Evidencia suficiente",
+                    "reviewer": "operador",
+                    "humanConfirmed": true
+                }),
+            ),
+            (
+                "learning.evaluateAdaptive",
+                serde_json::json!({
+                    "operation": "learning.evaluateAdaptive",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "requestId": "req-eval-1",
+                    "splitBoundaryAt": "2026-04-01T00:00:00.000Z",
+                    "heldOutCases": []
+                }),
+            ),
+            (
+                "learning.strategyActivate",
+                serde_json::json!({
+                    "operation": "learning.strategyActivate",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "mode": "rollback_to_baseline",
+                    "reviewer": "operador",
+                    "reason": "Rollback seguro",
+                    "humanConfirmed": true
+                }),
+            ),
+            (
+                "learning.strategyStatus",
+                serde_json::json!({
+                    "operation": "learning.strategyStatus",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id
+                }),
+            ),
+            (
+                "proactivity.evaluate",
+                serde_json::json!({
+                    "operation": "proactivity.evaluate",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id
+                }),
+            ),
+            (
+                "proactivity.suggestionList",
+                serde_json::json!({
+                    "operation": "proactivity.suggestionList",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id
+                }),
+            ),
+            (
+                "proactivity.suggestionRespond",
+                serde_json::json!({
+                    "operation": "proactivity.suggestionRespond",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "suggestionId": "sug-1",
+                    "action": "dismiss",
+                    "reason": "Nao aplicavel"
+                }),
+            ),
+            (
+                "proactivity.scheduleUpsert",
+                serde_json::json!({
+                    "operation": "proactivity.scheduleUpsert",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "label": "Janela diurna",
+                    "optInConfirmed": true,
+                    "windowStartUtc": "09:00",
+                    "windowEndUtc": "18:00",
+                    "allowedDaysUtc": [1, 2, 3],
+                    "minIntervalMinutes": 30
+                }),
+            ),
+            (
+                "proactivity.scheduleList",
+                serde_json::json!({
+                    "operation": "proactivity.scheduleList",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id
+                }),
+            ),
+            (
+                "proactivity.scheduleControl",
+                serde_json::json!({
+                    "operation": "proactivity.scheduleControl",
+                    "projectId": project_id,
+                    "bindingId": binding_id,
+                    "worktreeId": worktree_id,
+                    "scheduleId": "sched-1",
+                    "action": "revoke",
+                    "reason": "Revogado",
+                    "humanConfirmed": true
+                }),
+            ),
+        ];
+
+        for (op_name, req_json) in cases {
+            let req: IntelligenceRequest = serde_json::from_value(req_json.clone()).unwrap();
+            let op = Operation::Intelligence(&req);
+            assert_eq!(op.name(), op_name);
+            assert_eq!(serde_json::to_value(op).unwrap(), req_json);
+
+            let mut extra = req_json;
+            extra["unexpectedField"] = true.into();
+            assert!(serde_json::from_value::<IntelligenceRequest>(extra).is_err());
+
+            let ok_resp: Response = serde_json::from_value(serde_json::json!({
+                "version": VERSION,
+                "id": "intel-1",
+                "ok": true,
+                "operation": op_name,
+                "data": { "scope": scope_json() }
+            }))
+            .unwrap();
+            assert!(
+                ok_resp.matches("intel-1", op),
+                "{op_name} should match scope"
+            );
+
+            let bad_resp: Response = serde_json::from_value(serde_json::json!({
+                "version": VERSION,
+                "id": "intel-1",
+                "ok": true,
+                "operation": op_name,
+                "data": {
+                    "scope": {
+                        "projectId": project_id,
+                        "bindingId": binding_id,
+                        "worktreeId": other_id
+                    }
+                }
+            }))
+            .unwrap();
+            assert!(
+                !bad_resp.matches("intel-1", op),
                 "{op_name} must reject swapped worktreeId"
             );
         }

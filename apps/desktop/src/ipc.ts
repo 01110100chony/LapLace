@@ -61,6 +61,20 @@ import {
   type VerifierDefineInput,
   type VerifierApproveInput,
   type VerifierRunInput,
+  type ArenaSessionCreateInput,
+  type ArenaSessionRunInput,
+  type ArenaSessionGetInput,
+  type ArenaSessionReviewInput,
+  type ReplayQueryInput,
+  type ReplayDiffInput,
+  type ReplayDeliveryInspectInput,
+  type BkmHypothesisUpsertInput,
+  type BkmHypothesisTransitionInput,
+  type AdaptiveEvaluateInput,
+  type AdaptiveStrategyActivateInput,
+  type ProactivitySuggestionRespondInput,
+  type ProactiveScheduleUpsertInput,
+  type ProactiveScheduleControlInput,
 } from "@laplace/contracts";
 
 type DesktopCommand =
@@ -88,7 +102,8 @@ type DesktopCommand =
   | "resume_request"
   | "compiler_request"
   | "memory_request"
-  | "planner_request";
+  | "planner_request"
+  | "intelligence_request";
 type PickerOperation =
   "workspace.addLocal" | "project.relocate" | "clone.start";
 type DesktopOperation = Exclude<Operation, "codex.approval" | "clone.prepare">;
@@ -165,6 +180,26 @@ const commands: Record<DesktopOperation, DesktopCommand> = {
   "planner.verifierList": "planner_request",
   "planner.verifierApprove": "planner_request",
   "planner.verifierRun": "planner_request",
+  "arena.sessionCreate": "intelligence_request",
+  "arena.sessionRun": "intelligence_request",
+  "arena.sessionList": "intelligence_request",
+  "arena.sessionGet": "intelligence_request",
+  "arena.sessionReview": "intelligence_request",
+  "replay.query": "intelligence_request",
+  "replay.diff": "intelligence_request",
+  "replay.deliveryInspect": "intelligence_request",
+  "learning.hypothesisUpsert": "intelligence_request",
+  "learning.hypothesisList": "intelligence_request",
+  "learning.hypothesisTransition": "intelligence_request",
+  "learning.evaluateAdaptive": "intelligence_request",
+  "learning.strategyActivate": "intelligence_request",
+  "learning.strategyStatus": "intelligence_request",
+  "proactivity.evaluate": "intelligence_request",
+  "proactivity.suggestionList": "intelligence_request",
+  "proactivity.suggestionRespond": "intelligence_request",
+  "proactivity.scheduleUpsert": "intelligence_request",
+  "proactivity.scheduleList": "intelligence_request",
+  "proactivity.scheduleControl": "intelligence_request",
   "context.browse": "context_browse",
   "context.capture": "context_capture",
   "context.list": "context_list",
@@ -236,7 +271,8 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
           command === "resume_request" ||
           command === "compiler_request" ||
           command === "memory_request" ||
-          command === "planner_request"
+          command === "planner_request" ||
+          command === "intelligence_request"
           ? { id, request: { operation, ...args } }
           : { ...args, id },
       );
@@ -244,7 +280,8 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
       const response =
         picker ||
         operation === "codex.start" ||
-        operation === "planner.verifierRun"
+        operation === "planner.verifierRun" ||
+        operation === "arena.sessionRun"
           ? await call
           : await Promise.race([
               call,
@@ -302,7 +339,11 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
         } else if (
           operation === "compiler.compile" ||
           operation.startsWith("memory.") ||
-          operation.startsWith("planner.")
+          operation.startsWith("planner.") ||
+          operation.startsWith("arena.") ||
+          operation.startsWith("replay.") ||
+          operation.startsWith("learning.") ||
+          operation.startsWith("proactivity.")
         ) {
           // Scope validation above already verifies IdentityScope on F2/F3 responses.
         } else if (
@@ -824,6 +865,54 @@ export function createDesktopClient(invoke: Invoke, deadlineMs = 20_000) {
       verifierRun: (input: VerifierRunInput) =>
         request("planner.verifierRun", input),
     },
+    intelligence: {
+      arena: {
+        sessionCreate: (input: ArenaSessionCreateInput) =>
+          request("arena.sessionCreate", input),
+        sessionRun: (input: ArenaSessionRunInput) =>
+          request("arena.sessionRun", input),
+        sessionList: (scope: IdentityScope) =>
+          request("arena.sessionList", scope),
+        sessionGet: (input: ArenaSessionGetInput) =>
+          request("arena.sessionGet", input),
+        sessionReview: (input: ArenaSessionReviewInput) =>
+          request("arena.sessionReview", input),
+      },
+      replay: {
+        query: (input: ReplayQueryInput) => request("replay.query", input),
+        diff: (input: ReplayDiffInput) => request("replay.diff", input),
+        deliveryInspect: (input: ReplayDeliveryInspectInput) =>
+          request("replay.deliveryInspect", input),
+      },
+      learning: {
+        hypothesisUpsert: (input: BkmHypothesisUpsertInput) =>
+          request("learning.hypothesisUpsert", input),
+        hypothesisList: (scope: IdentityScope) =>
+          request("learning.hypothesisList", scope),
+        hypothesisTransition: (input: BkmHypothesisTransitionInput) =>
+          request("learning.hypothesisTransition", input),
+        evaluateAdaptive: (input: AdaptiveEvaluateInput) =>
+          request("learning.evaluateAdaptive", input),
+        strategyActivate: (input: AdaptiveStrategyActivateInput) =>
+          request("learning.strategyActivate", input),
+        strategyStatus: (scope: IdentityScope) =>
+          request("learning.strategyStatus", scope),
+      },
+      proactivity: {
+        evaluate: (scope: IdentityScope) =>
+          request("proactivity.evaluate", scope),
+        suggestionList: (scope: IdentityScope) =>
+          request("proactivity.suggestionList", scope),
+        suggestionRespond: (input: ProactivitySuggestionRespondInput) =>
+          request("proactivity.suggestionRespond", input),
+        scheduleUpsert: (input: ProactiveScheduleUpsertInput) =>
+          request("proactivity.scheduleUpsert", input),
+        scheduleList: (scope: IdentityScope) =>
+          request("proactivity.scheduleList", scope),
+        scheduleControl: (input: ProactiveScheduleControlInput) =>
+          request("proactivity.scheduleControl", input),
+      },
+    },
   };
 }
 
@@ -980,6 +1069,26 @@ const messages: Record<ErrorCode, string> = {
     "A aprovação do verificador é inexistente ou foi revogada automaticamente pela alteração do comando.",
   context_source_unavailable:
     "A fonte preservada está indisponível ou não passou na verificação de integridade.",
+  intelligence_invalid_input:
+    "Dados inválidos ou confirmação humana obrigatória ausente na operação F5.",
+  intelligence_not_found:
+    "O registro solicitado da F5 (sessão, hipótese, avaliação ou agenda) não foi encontrado neste escopo.",
+  arena_base_divergence:
+    "A base Git divergiu entre as worktrees da Arena; o ensaio comparativo foi invalidado.",
+  arena_review_incomplete:
+    "A revisão pareada exige avaliar e pontuar explicitamente todas as hipóteses da Arena.",
+  arena_session_invalidated:
+    "Esta sessão da Arena foi invalidada por divergência de base ou critérios e não pode ser concluída.",
+  replay_invalid_range:
+    "Informe timestamps ISO válidos para validAt e knownAt ao consultar o Replay explicável.",
+  learning_hypothesis_conflict:
+    "A transição solicitada para a hipótese simbólica conflita com o estado atual ou com o grupo concorrente.",
+  adaptive_gate_rejected:
+    "A estratégia adaptativa não atingiu o corte held-out sem vazamentos/regressões e o baseline FTS5 foi mantido.",
+  proactivity_opt_in_required:
+    "A ação proativa exige opt-in ativo, janela UTC permitida e modo app fechado desativado (disabled_deferred).",
+  proactivity_schedule_conflict:
+    "Conflito de agenda ou execução duplicada na mesma janela proativa.",
 };
 
 export function errorMessage(error: unknown): string {

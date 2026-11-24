@@ -779,3 +779,119 @@ test("roteia operacoes planner.* pelo comando planner_request e rejeita resposta
     /revogada automaticamente/,
   );
 });
+
+test("encaminha operacoes F5 (arena, replay, learning e proactivity) por intelligence_request com escopo e mensagens", async () => {
+  const scope = {
+    projectId: "a".repeat(64),
+    bindingId: "b".repeat(64),
+    worktreeId: "c".repeat(64),
+  };
+  let corruptScope = false;
+
+  const client = createDesktopClient(async (command, args) => {
+    assert.equal(command, "intelligence_request");
+    const req = args.request as Record<string, unknown>;
+    const op = req.operation as string;
+    const respScope = corruptScope
+      ? { ...scope, bindingId: "9".repeat(64) }
+      : scope;
+
+    if (op === "arena.sessionList") {
+      return {
+        version: protocolVersion,
+        id: args.id,
+        ok: true,
+        operation: op,
+        data: { scope: respScope, items: [] },
+      };
+    }
+    if (op === "replay.query") {
+      return {
+        version: protocolVersion,
+        id: args.id,
+        ok: true,
+        operation: op,
+        data: {
+          scope: respScope,
+          validAt: "2026-02-01T00:00:00.000Z",
+          knownAt: "2026-03-01T00:00:00.000Z",
+          claims: [],
+          decisions: [],
+          relations: [],
+          conflicts: [],
+          gaps: [],
+          deliveries: [],
+          versionTimeline: [],
+        },
+      };
+    }
+    if (op === "learning.strategyStatus") {
+      return {
+        version: protocolVersion,
+        id: args.id,
+        ok: true,
+        operation: op,
+        data: {
+          scope: respScope,
+          activeMode: "baseline_fts5",
+          activeVersion: "baseline_fts5_v1",
+          evaluationId: null,
+          activatedAt: null,
+          activatedBy: null,
+          rollbackReason: null,
+          latestEvaluation: null,
+          evaluations: [],
+        },
+      };
+    }
+    if (op === "proactivity.scheduleList") {
+      return {
+        version: protocolVersion,
+        id: args.id,
+        ok: true,
+        operation: op,
+        data: {
+          scope: respScope,
+          schedules: [],
+          runs: [],
+          appClosedSupported: false,
+        },
+      };
+    }
+    assert.fail(`unexpected op: ${op}`);
+  });
+
+  const sessions = await client.intelligence.arena.sessionList(scope);
+  assert.equal(sessions.items.length, 0);
+
+  const replay = await client.intelligence.replay.query({
+    ...scope,
+    validAt: "2026-02-01T00:00:00.000Z",
+    knownAt: "2026-03-01T00:00:00.000Z",
+  });
+  assert.equal(replay.claims.length, 0);
+
+  const status = await client.intelligence.learning.strategyStatus(scope);
+  assert.equal(status.activeMode, "baseline_fts5");
+
+  const schedules = await client.intelligence.proactivity.scheduleList(scope);
+  assert.equal(schedules.appClosedSupported, false);
+
+  corruptScope = true;
+  await assert.rejects(client.intelligence.arena.sessionList(scope), {
+    code: "invalid_response",
+  });
+
+  assert.match(
+    errorMessage(new DesktopError("arena_base_divergence")),
+    /divergiu entre as worktrees/,
+  );
+  assert.match(
+    errorMessage(new DesktopError("adaptive_gate_rejected")),
+    /baseline FTS5/,
+  );
+  assert.match(
+    errorMessage(new DesktopError("proactivity_opt_in_required")),
+    /disabled_deferred/,
+  );
+});

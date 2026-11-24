@@ -413,6 +413,7 @@ export function App() {
               decisionClient={desktop.decisions}
               memoryClient={desktop.memory}
               plannerClient={desktop.planner}
+              intelligenceClient={desktop.intelligence}
               onResumeUpdated={() => inspect(active)}
             />
           ) : (
