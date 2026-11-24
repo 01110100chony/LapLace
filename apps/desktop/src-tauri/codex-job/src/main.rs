@@ -159,6 +159,7 @@ fn create_job(limits: &JOBOBJECT_EXTENDED_LIMIT_INFORMATION) -> io::Result<Owned
     Ok(job)
 }
 
+#[cfg(test)]
 pub(crate) fn mode_supported(mode: &str) -> bool {
     if cfg!(feature = "clone-only") {
         mode == "--laplace-clone-job"
