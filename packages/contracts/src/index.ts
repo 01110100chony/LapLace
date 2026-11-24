@@ -88,6 +88,16 @@ export const errorCodes = [
   "apply_not_approved",
   "apply_conflict_detected",
   "verifier_approval_invalid",
+  "intelligence_invalid_input",
+  "intelligence_not_found",
+  "arena_base_divergence",
+  "arena_review_incomplete",
+  "arena_session_invalidated",
+  "replay_invalid_range",
+  "learning_hypothesis_conflict",
+  "adaptive_gate_rejected",
+  "proactivity_opt_in_required",
+  "proactivity_schedule_conflict",
   "clone_unavailable",
   "clone_busy",
   ...cloneFailures,
@@ -137,6 +147,7 @@ export type Results = ContextResults &
   CompilerResults &
   MemoryResults &
   PlannerResults &
+  IntelligenceResults &
   CloneResults & {
     health: Health;
     "workspace.list": Catalog;
@@ -166,6 +177,7 @@ export type Request = Envelope &
     | CompilerRequests
     | MemoryRequests
     | PlannerRequests
+    | IntelligenceRequests
     | CloneRequests
   );
 export type Response<K extends Operation = Operation> =
@@ -223,6 +235,8 @@ export function parseRequest(value: unknown): Request | undefined {
   if (memory) return { ...envelope, ...memory };
   const planner = parsePlannerRequest(value);
   if (planner) return { ...envelope, ...planner };
+  const intelligence = parseIntelligenceRequest(value);
+  if (intelligence) return { ...envelope, ...intelligence };
   if (value.operation === "health") return { ...envelope, operation: "health" };
   if (value.operation === "workspace.list")
     return { ...envelope, operation: "workspace.list" };
@@ -428,6 +442,29 @@ export function isResponse<K extends Operation>(
   )
     return isPlannerResult(operation, value.data);
   if (
+    operation === "arena.sessionCreate" ||
+    operation === "arena.sessionRun" ||
+    operation === "arena.sessionList" ||
+    operation === "arena.sessionGet" ||
+    operation === "arena.sessionReview" ||
+    operation === "replay.query" ||
+    operation === "replay.diff" ||
+    operation === "replay.deliveryInspect" ||
+    operation === "learning.hypothesisUpsert" ||
+    operation === "learning.hypothesisList" ||
+    operation === "learning.hypothesisTransition" ||
+    operation === "learning.evaluateAdaptive" ||
+    operation === "learning.strategyActivate" ||
+    operation === "learning.strategyStatus" ||
+    operation === "proactivity.evaluate" ||
+    operation === "proactivity.suggestionList" ||
+    operation === "proactivity.suggestionRespond" ||
+    operation === "proactivity.scheduleUpsert" ||
+    operation === "proactivity.scheduleList" ||
+    operation === "proactivity.scheduleControl"
+  )
+    return isIntelligenceResult(operation, value.data);
+  if (
     operation === "codex.status" ||
     operation === "codex.prepare" ||
     operation === "codex.approval" ||
@@ -549,3 +586,10 @@ import {
   type PlannerResults,
 } from "./planner.ts";
 export * from "./planner.ts";
+import {
+  isIntelligenceResult,
+  parseIntelligenceRequest,
+  type IntelligenceRequests,
+  type IntelligenceResults,
+} from "./intelligence.ts";
+export * from "./intelligence.ts";

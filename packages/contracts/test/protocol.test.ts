@@ -1745,3 +1745,305 @@ test("F4 valida todas as 20 operacoes planner.* e rejeita cross-scope ou inputs 
     ),
   );
 });
+
+test("F5: valida todas as 20 operacoes arena.*, replay.*, learning.* e proactivity.* e rejeita entradas/escopos invalidos", () => {
+  const scope = {
+    projectId: "a".repeat(64),
+    bindingId: "b".repeat(64),
+    worktreeId: "c".repeat(64),
+  };
+  const wrongScope = { ...scope, worktreeId: "9".repeat(64) };
+  const sha = "e".repeat(64);
+  const now = "2026-11-24T08:00:00.000Z";
+  const base = {
+    head: "1".repeat(40),
+    branch: "main",
+    indexStamp: "idx-1-100",
+    worktreeRoot: "C:\\Repo",
+    dirtyDigest: "0".repeat(64),
+  };
+
+  const validRequests: Record<string, unknown>[] = [
+    {
+      ...envelope,
+      operation: "arena.sessionCreate",
+      ...scope,
+      requestId: "req-arena-1",
+      title: "Comparar solucoes",
+      objective: "Isolar cache",
+      backendMode: "mock_supervised",
+      criteria: {
+        sharedObjective: "Seguranca",
+        items: [{ criterionId: "safety", label: "Seguranca", weight: 2 }],
+      },
+      hypotheses: [
+        {
+          hypothesisId: "h1",
+          label: "Abordagem A",
+          summary: "Editar arquivo A",
+          targetPaths: ["a.txt"],
+        },
+        {
+          hypothesisId: "h2",
+          label: "Abordagem B",
+          summary: "Editar arquivo B",
+          targetPaths: ["b.txt"],
+        },
+      ],
+      humanConfirmed: true,
+    },
+    {
+      ...envelope,
+      operation: "arena.sessionRun",
+      ...scope,
+      sessionId: "sess-1",
+      humanConfirmed: true,
+    },
+    { ...envelope, operation: "arena.sessionList", ...scope },
+    {
+      ...envelope,
+      operation: "arena.sessionGet",
+      ...scope,
+      sessionId: "sess-1",
+    },
+    {
+      ...envelope,
+      operation: "arena.sessionReview",
+      ...scope,
+      sessionId: "sess-1",
+      requestId: "req-rev-1",
+      outcome: "winner_selected",
+      winnerHypothesisId: "h1",
+      reviewer: "Operador",
+      rationale: "Melhor cobertura de casos",
+      reviewedHypothesisIds: ["h1", "h2"],
+      criterionScores: [
+        { hypothesisId: "h1", criterionId: "safety", score: 9 },
+      ],
+      evidenceRefs: ["diff:h1"],
+      humanConfirmed: true,
+    },
+    {
+      ...envelope,
+      operation: "replay.query",
+      ...scope,
+      validAt: now,
+      knownAt: now,
+    },
+    {
+      ...envelope,
+      operation: "replay.diff",
+      ...scope,
+      pointA: { validAt: now, knownAt: now },
+      pointB: { validAt: now, knownAt: now },
+    },
+    {
+      ...envelope,
+      operation: "replay.deliveryInspect",
+      ...scope,
+      manifestDigest: sha,
+      knownAt: now,
+    },
+    {
+      ...envelope,
+      operation: "learning.hypothesisUpsert",
+      ...scope,
+      requestId: "req-bkm-1",
+      competingGroupKey: "grp-1",
+      category: "retrieval_boost",
+      title: "Boost auth",
+      statement: "Priorizar auth",
+      pattern: {
+        keywords: ["auth"],
+        pathPrefixes: ["src/"],
+        boostWeight: 3,
+        preferCanonical: true,
+        preferRecent: true,
+      },
+    },
+    { ...envelope, operation: "learning.hypothesisList", ...scope },
+    {
+      ...envelope,
+      operation: "learning.hypothesisTransition",
+      ...scope,
+      hypothesisId: "bkm-1",
+      toState: "reverted",
+      reason: "Reverter regra",
+      reviewer: "Operador",
+      humanConfirmed: true,
+    },
+    {
+      ...envelope,
+      operation: "learning.evaluateAdaptive",
+      ...scope,
+      requestId: "req-eval-1",
+      splitBoundaryAt: now,
+      heldOutCases: [],
+    },
+    {
+      ...envelope,
+      operation: "learning.strategyActivate",
+      ...scope,
+      mode: "rollback_to_baseline",
+      reviewer: "Operador",
+      reason: "Voltar FTS5",
+      humanConfirmed: true,
+    },
+    { ...envelope, operation: "learning.strategyStatus", ...scope },
+    { ...envelope, operation: "proactivity.evaluate", ...scope },
+    { ...envelope, operation: "proactivity.suggestionList", ...scope },
+    {
+      ...envelope,
+      operation: "proactivity.suggestionRespond",
+      ...scope,
+      suggestionId: "sug-1",
+      action: "dismiss",
+      reason: "Nao aplicavel",
+    },
+    {
+      ...envelope,
+      operation: "proactivity.scheduleUpsert",
+      ...scope,
+      label: "Janela diaria",
+      optInConfirmed: true,
+      windowStartUtc: "09:00",
+      windowEndUtc: "18:00",
+      allowedDaysUtc: [1, 2, 3, 4, 5],
+      minIntervalMinutes: 60,
+    },
+    { ...envelope, operation: "proactivity.scheduleList", ...scope },
+    {
+      ...envelope,
+      operation: "proactivity.scheduleControl",
+      ...scope,
+      scheduleId: "sched-1",
+      action: "trigger_window",
+      evaluatedAt: now,
+    },
+  ];
+
+  for (const req of validRequests) {
+    assert.ok(parseRequest(req), `expected valid: ${String(req.operation)}`);
+  }
+
+  // Rejeita < 2 hipoteses na Arena e datas invalidas no Replay
+  assert.equal(
+    parseRequest({
+      ...validRequests[0],
+      hypotheses: [(validRequests[0]!.hypotheses as unknown[])[0]],
+    }),
+    undefined,
+  );
+  assert.equal(
+    parseRequest({
+      ...validRequests[5],
+      validAt: "2026-99-99",
+    }),
+    undefined,
+  );
+
+  // Valida responses F5 e rejeita escopo cruzado
+  assert.ok(
+    isResponse(
+      {
+        ...envelope,
+        ok: true,
+        operation: "arena.sessionCreate",
+        data: {
+          scope,
+          sessionId: "sess-1",
+          requestId: "req-arena-1",
+          title: "Arena",
+          objective: "Comparar",
+          backendMode: "mock_supervised",
+          status: "created",
+          invalidationReason: null,
+          base,
+          baseDigest: sha,
+          criteria: { sharedObjective: "Seg", items: [] },
+          criteriaDigest: sha,
+          hypotheses: [
+            {
+              ordinal: 0,
+              hypothesisId: "h1",
+              label: "H1",
+              summary: "S1",
+              targetPaths: ["a.txt"],
+              proposedEdits: [],
+              observedBaseHead: base.head,
+              observedBaseIndexStamp: base.indexStamp,
+              observedBaseDigest: sha,
+              criteriaDigest: sha,
+              planId: null,
+              grantId: null,
+              executionId: null,
+              dedicatedWorktreeId: null,
+              dedicatedRoot: null,
+              diffDigest: null,
+              diffFiles: [],
+              sourceRefs: [],
+              state: "pending",
+              failureCode: null,
+            },
+            {
+              ordinal: 1,
+              hypothesisId: "h2",
+              label: "H2",
+              summary: "S2",
+              targetPaths: ["b.txt"],
+              proposedEdits: [],
+              observedBaseHead: base.head,
+              observedBaseIndexStamp: base.indexStamp,
+              observedBaseDigest: sha,
+              criteriaDigest: sha,
+              planId: null,
+              grantId: null,
+              executionId: null,
+              dedicatedWorktreeId: null,
+              dedicatedRoot: null,
+              diffDigest: null,
+              diffFiles: [],
+              sourceRefs: [],
+              state: "pending",
+              failureCode: null,
+            },
+          ],
+          pairedReview: null,
+          appliedToLocal: false,
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+      envelope.id,
+      "arena.sessionCreate",
+    ),
+  );
+
+  assert.ok(
+    !isResponse(
+      {
+        ...envelope,
+        ok: true,
+        operation: "proactivity.scheduleUpsert",
+        data: {
+          scope: wrongScope,
+          scheduleId: "sched-1",
+          label: "L",
+          optInActive: true,
+          status: "active",
+          windowStartUtc: "09:00",
+          windowEndUtc: "18:00",
+          allowedDaysUtc: [1],
+          minIntervalMinutes: 60,
+          appClosedMode: "enabled",
+          revokedAt: null,
+          revokeReason: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      },
+      envelope.id,
+      "proactivity.scheduleUpsert",
+    ),
+  );
+});

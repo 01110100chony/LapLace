@@ -48,3 +48,19 @@ export {
   type VerifierApprovalValidation,
   type VerifierTuple,
 } from "./planner.ts";
+export {
+  buildReplayVersionPoints,
+  canTransitionBkmState,
+  classifyReplayGaps,
+  computeArenaCriteriaDigest,
+  computeProactivityTelemetry,
+  diffReplayStates,
+  evaluateAdaptiveStrategy,
+  evaluateProactiveSignals,
+  evaluateScheduleWindow,
+  scoreCandidateWithStrategy,
+  summarizeBkmHypothesis,
+  validateArenaBaseEquivalence,
+  validateArenaPairedReview,
+  type ProactiveSignalCandidate,
+} from "./intelligence.ts";
