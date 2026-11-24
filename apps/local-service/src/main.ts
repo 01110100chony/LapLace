@@ -31,6 +31,10 @@ import { createInboxExportService } from "./inbox-export-service.ts";
 import { createDirtyOverlayService } from "./dirty-overlay-service.ts";
 import { PlannerSupervisor } from "./planner-supervisor.ts";
 import { createPlannerService } from "./planner-service.ts";
+import { createArenaService } from "./arena-service.ts";
+import { createReplayService } from "./replay-service.ts";
+import { createLearningService } from "./learning-service.ts";
+import { createProactivityService } from "./proactivity-service.ts";
 
 // Defined when the sidecar is bundled. The source entry point and the
 // distribution bundle ignore all development arguments.
@@ -181,6 +185,14 @@ const plannerService = createPlannerService({
     ...withCatalog((store) => store.list().projects.map(({ root }) => root)),
   ],
 });
+const arenaService = createArenaService({
+  withCatalog,
+  plannerService,
+  plannerSupervisor,
+});
+const replayService = createReplayService({ withCatalog });
+const learningService = createLearningService({ withCatalog });
+const proactivityService = createProactivityService({ withCatalog });
 
 async function respond(line: string): Promise<Response> {
   let value: unknown;
@@ -600,6 +612,86 @@ async function respond(line: string): Promise<Response> {
     }
     if (request.operation === "planner.verifierRun") {
       const data = await plannerService.verifierRun(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "arena.sessionCreate") {
+      const data = await arenaService.sessionCreate(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "arena.sessionRun") {
+      const data = await arenaService.sessionRun(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "arena.sessionGet") {
+      const data = arenaService.sessionGet(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "arena.sessionList") {
+      const data = arenaService.sessionList(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "arena.sessionReview") {
+      const data = arenaService.sessionReview(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "replay.query") {
+      const data = replayService.query(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "replay.diff") {
+      const data = replayService.diff(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "replay.deliveryInspect") {
+      const data = replayService.deliveryInspect(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "learning.hypothesisUpsert") {
+      const data = learningService.hypothesisUpsert(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "learning.hypothesisList") {
+      const data = learningService.hypothesisList(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "learning.hypothesisTransition") {
+      const data = learningService.hypothesisTransition(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "learning.evaluateAdaptive") {
+      const data = learningService.evaluateAdaptive(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "learning.strategyActivate") {
+      const data = learningService.strategyActivate(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "learning.strategyStatus") {
+      const data = learningService.strategyStatus(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "proactivity.evaluate") {
+      const data = proactivityService.evaluate(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "proactivity.suggestionList") {
+      const data = proactivityService.suggestionList(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "proactivity.suggestionRespond") {
+      const data = proactivityService.suggestionRespond(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "proactivity.scheduleUpsert") {
+      const data = proactivityService.scheduleUpsert(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "proactivity.scheduleList") {
+      const data = proactivityService.scheduleList(request);
+      return { ...envelope, operation: request.operation, ok: true, data };
+    }
+    if (request.operation === "proactivity.scheduleControl") {
+      const data = proactivityService.scheduleControl(request);
       return { ...envelope, operation: request.operation, ok: true, data };
     }
     const project = withCatalog((store) => store.lookup(request.projectId));
