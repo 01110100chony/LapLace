@@ -1,11 +1,6 @@
+import { VisualIcon } from "../VisualIcon";
 import { useState } from "react";
-import {
-  graphEdges,
-  graphNodes,
-  memoryRecords,
-  sources,
-  type GraphKind,
-} from "./fixtures";
+import { memoryRecords, sources } from "./fixtures";
 import {
   Evidence,
   PreviewLinks,
@@ -14,9 +9,15 @@ import {
   type NavigatePreview,
 } from "./Shared";
 
-export function MemoryExplorer({ navigate }: { navigate: NavigatePreview }) {
+export function MemoryExplorer({
+  navigate,
+  focus,
+}: {
+  navigate: NavigatePreview;
+  focus?: string;
+}) {
   const [query, setQuery] = useState("");
-  const [selection, setSelection] = useState("m1");
+  const [selection, setSelection] = useState(focus ?? "m1");
   const [version, setVersion] = useState<number>();
   const results = memoryRecords.filter((item) =>
     (item.title + " " + item.scope)
@@ -29,7 +30,7 @@ export function MemoryExplorer({ navigate }: { navigate: NavigatePreview }) {
     active?.revisions[0];
   return (
     <div className="preview-workbench">
-      <PreviewSection title="Registros de memória">
+      <PreviewSection title="Registros de memória" icon="archive">
         <label className="preview-input">
           <span>Filtrar registros</span>
           <input
@@ -60,7 +61,7 @@ export function MemoryExplorer({ navigate }: { navigate: NavigatePreview }) {
           </p>
         )}
       </PreviewSection>
-      <PreviewSection title="Revisão e origem">
+      <PreviewSection title="Revisão e origem" icon="decision">
         {active && revision ? (
           <>
             <p className="preview-detail-title">{active.title}</p>
@@ -83,160 +84,21 @@ export function MemoryExplorer({ navigate }: { navigate: NavigatePreview }) {
             <p className="preview-muted">Observada em {revision.observed}</p>
             <p className="preview-reading">{revision.content}</p>
             <Evidence id={active.source} />
-            <PreviewLinks ids={["graph", "replay"]} navigate={navigate} />
+            <div className="preview-related">
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => navigate("graph", active.id)}
+              >
+                Localizar no KGraph <VisualIcon name="forward" />
+              </button>
+            </div>
+            <PreviewLinks ids={["replay"]} navigate={navigate} />
           </>
         ) : (
           <p className="preview-muted">
             Escolha um registro para examinar sua revisão.
           </p>
-        )}
-      </PreviewSection>
-    </div>
-  );
-}
-
-const graphTypes: readonly GraphKind[] = ["Decisão", "Fonte", "Tarefa"];
-
-export function KnowledgeGraph({ navigate }: { navigate: NavigatePreview }) {
-  const [types, setTypes] = useState<GraphKind[]>([...graphTypes]);
-  const [selected, setSelected] = useState("n1");
-  const visible = graphNodes.filter((item) => types.includes(item.type));
-  const active = visible.find((item) => item.id === selected) ?? visible[0];
-  const edges = graphEdges.filter(
-    (edge) =>
-      visible.some(({ id }) => id === edge.from) &&
-      visible.some(({ id }) => id === edge.to),
-  );
-  return (
-    <div className="preview-workbench graph-bench">
-      <PreviewSection title="Relações da fixture">
-        <div className="preview-switch" role="group" aria-label="Tipos de nó">
-          {graphTypes.map((type) => (
-            <button
-              type="button"
-              key={type}
-              aria-pressed={types.includes(type)}
-              onClick={() =>
-                setTypes((current) =>
-                  current.includes(type)
-                    ? current.filter((value) => value !== type)
-                    : [...current, type],
-                )
-              }
-            >
-              {type}
-            </button>
-          ))}
-        </div>
-        {visible.length ? (
-          <div className="graph-viewport">
-            <svg
-              className="knowledge-graph"
-              viewBox="0 0 640 290"
-              role="group"
-              aria-label="Grafo demonstrativo de relações"
-            >
-              {edges.map((edge) => {
-                const from = graphNodes.find((item) => item.id === edge.from)!;
-                const to = graphNodes.find((item) => item.id === edge.to)!;
-                const middle = (from.x + to.x) / 2;
-                return (
-                  <path
-                    className="graph-edge"
-                    key={edge.from + edge.to}
-                    data-kind={from.type}
-                    data-connected={
-                      active?.id === edge.from || active?.id === edge.to
-                    }
-                    d={`M ${from.x} ${from.y} C ${middle} ${from.y}, ${middle} ${to.y}, ${to.x} ${to.y}`}
-                  />
-                );
-              })}
-              {visible.map((item) => (
-                <g
-                  key={item.id}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={item.name}
-                  aria-pressed={active?.id === item.id}
-                  className="graph-node"
-                  data-kind={item.type}
-                  transform={"translate(" + item.x + " " + item.y + ")"}
-                  onClick={() => setSelected(item.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      setSelected(item.id);
-                    }
-                  }}
-                >
-                  <rect x="-89" y="-22" width="178" height="44" rx="13" />
-                  <circle cx="-77" cy="0" r="2.7" />
-                  <text textAnchor="middle" x="5" y="4">
-                    {item.name}
-                  </text>
-                </g>
-              ))}
-            </svg>
-          </div>
-        ) : (
-          <p className="preview-muted">
-            Selecione um tipo de nó para mostrar relações.
-          </p>
-        )}
-        {!!visible.length && (
-          <details className="preview-disclosure">
-            <summary>Navegar por lista</summary>
-            <ul>
-              {visible.map((item) => (
-                <li key={item.id}>
-                  <PreviewRow
-                    title={item.name}
-                    detail={item.type}
-                    active={active?.id === item.id}
-                    onClick={() => setSelected(item.id)}
-                  />
-                </li>
-              ))}
-            </ul>
-          </details>
-        )}
-      </PreviewSection>
-      <PreviewSection title="Nó selecionado">
-        {active && (
-          <>
-            <p className="preview-detail-title">{active.name}</p>
-            <p className="preview-muted">{active.type}</p>
-            <Evidence id={active.evidence} />
-            <ul
-              className="graph-relations"
-              aria-label="Relações do nó selecionado"
-            >
-              {edges
-                .filter(
-                  (edge) => edge.from === active.id || edge.to === active.id,
-                )
-                .map((edge) => {
-                  const outgoing = edge.from === active.id;
-                  const other = graphNodes.find(
-                    (node) => node.id === (outgoing ? edge.to : edge.from),
-                  )!;
-                  const relation = outgoing
-                    ? active.name + " " + edge.relation + " " + other.name
-                    : other.name + " " + edge.relation + " " + active.name;
-                  return (
-                    <li key={edge.from + edge.to}>
-                      <PreviewRow
-                        title={other.name}
-                        detail={relation}
-                        onClick={() => setSelected(other.id)}
-                      />
-                    </li>
-                  );
-                })}
-            </ul>
-            <PreviewLinks ids={["memory", "compiler"]} navigate={navigate} />
-          </>
         )}
       </PreviewSection>
     </div>

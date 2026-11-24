@@ -19,7 +19,7 @@ export function AgentCenter({ navigate }: { navigate: NavigatePreview }) {
   const active = visible.find((item) => item.id === id) ?? visible[0];
   return (
     <div className="preview-workbench">
-      <PreviewSection title="Sessões de exemplo">
+      <PreviewSection title="Sessões de exemplo" icon="agent">
         <label className="preview-input">
           <span>Estado da sessão</span>
           <select
@@ -50,7 +50,7 @@ export function AgentCenter({ navigate }: { navigate: NavigatePreview }) {
           ))}
         </ul>
       </PreviewSection>
-      <PreviewSection title="Tentativa e revisão">
+      <PreviewSection title="Tentativa e revisão" icon="activity">
         {active && (
           <>
             <p className="preview-detail-title">{active.title}</p>

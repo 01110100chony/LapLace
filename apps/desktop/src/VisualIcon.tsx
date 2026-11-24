@@ -15,7 +15,18 @@ const strokes = {
   close: <path d="m6 6 12 12M18 6 6 18" />,
   overview: <path d="M4 5h16v14H4z M4 12h16 M12 5v7" />,
   archive: <path d="M4 4.5h16v4H4z M5.5 8.5v11h13v-11 M10 12h4" />,
-  tasks: <path d="M8 5h12m-12 7h12m-12 7h12M4 5h.01M4 12h.01M4 19h.01" />,
+  tasks: (
+    <path d="M9 5h11M9 12h11M9 19h11M3 5l1 1 2-2M3 12l1 1 2-2M3 19l1 1 2-2" />
+  ),
+  decision: <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3zm-4 9 2.5 2.5L16 9" />,
+  panel: <path d="M3.5 5h17v14h-17zM9 5v14m4-10 3 3-3 3" />,
+  panelCollapse: <path d="M3.5 5h17v14h-17zM9 5v14m7-10-3 3 3 3" />,
+  menu: <path d="M4 6h16M4 12h16M4 18h16" />,
+  list: <path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01" />,
+  filter: <path d="M4 6h16M7 12h10M10 18h4" />,
+  fit: <path d="M9 4H4v5m11-5h5v5M4 15v5h5m11-5v5h-5M9 9h6v6H9z" />,
+  minus: <path d="M5 12h14" />,
+  activity: <path d="M3 12h4l3-7 4 14 3-7h4" />,
   git: (
     <>
       <circle cx="7" cy="5" r="2" />

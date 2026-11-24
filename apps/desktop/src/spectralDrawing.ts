@@ -6,38 +6,53 @@ const palettes = {
   Quartz: ["158 77 43", "103 85 145", "46 109 94"],
 } satisfies Record<Theme, readonly [string, string, string]>;
 
-const strands = 24;
-const middle = (strands - 1) / 2;
-const points = 60;
-const stride = points + 1;
+export type SpectralVariant = "project" | "landscape" | "rail";
+
 const nodes = [0.17, 0.37, 0.55, 0.72, 0.85];
-const columns = Array.from({ length: stride }, (_, i) => {
-  const q = i / points;
-  return {
-    q,
-    envelope: Math.sin(Math.PI * q),
-    warm:
-      0.37 +
-      0.26 * Math.sin(Math.PI * (q * 0.95 + 0.09)) +
-      0.11 * Math.sin(2 * Math.PI * (q * 1.08 - 0.16)),
-    cool: 0.69 - 0.37 * Math.exp(-(((q - 0.68) / 0.25) ** 2)),
-  };
-});
-const lanes = Array.from({ length: strands }, (_, lane) => ({
-  spread: (lane - middle) / middle,
-  opacity: 0.07 + Math.exp(-(((lane - middle) / 8) ** 2)) * 0.12,
-  firstSine: Math.sin(lane * 0.14),
-  firstCosine: Math.cos(lane * 0.14),
-  secondSine: Math.sin(lane * 0.1),
-  secondCosine: Math.cos(lane * 0.1),
-}));
+
+function createMesh(strands: number, points: number) {
+  const middle = (strands - 1) / 2;
+  const stride = points + 1;
+  const columns = Array.from({ length: stride }, (_, i) => {
+    const q = i / points;
+    return {
+      q,
+      envelope: Math.sin(Math.PI * q),
+      warm:
+        0.37 +
+        0.26 * Math.sin(Math.PI * (q * 0.95 + 0.09)) +
+        0.11 * Math.sin(2 * Math.PI * (q * 1.08 - 0.16)),
+      cool: 0.69 - 0.37 * Math.exp(-(((q - 0.68) / 0.25) ** 2)),
+    };
+  });
+  const lanes = Array.from({ length: strands }, (_, lane) => ({
+    spread: (lane - middle) / middle,
+    opacity:
+      0.07 + Math.exp(-(((lane - middle) / (middle * (8 / 11.5))) ** 2)) * 0.12,
+    firstSine: Math.sin(lane * 0.14),
+    firstCosine: Math.cos(lane * 0.14),
+    secondSine: Math.sin(lane * 0.1),
+    secondCosine: Math.cos(lane * 0.1),
+  }));
+
+  return { strands, points, stride, columns, lanes };
+}
+
+const heroMesh = createMesh(24, 60);
+const railMesh = createMesh(12, 32);
 
 export function createSpectralDrawing(
   ctx: CanvasRenderingContext2D,
   theme: Theme,
-  landscape = false,
+  variant: SpectralVariant,
 ) {
   const colors = palettes[theme];
+  const landscape = variant === "landscape";
+  const rail = variant === "rail";
+  const { strands, points, stride, columns, lanes } = rail
+    ? railMesh
+    : heroMesh;
+  const particles = rail ? 12 : 37;
   const paths = new Float32Array(stride * strands);
   // Cache the ridge geometry. Only its scale and the moving carrier change.
   const contours = landscape
@@ -115,15 +130,19 @@ export function createSpectralDrawing(
           27 *
           pointer.influence *
           Math.exp(-(((q - pointer.x) / 0.19) ** 2));
-        const base = warm
-          ? column.warm
-          : column.cool - 0.075 * Math.sin(q * 12 + phase * 0.18);
+        const base = rail
+          ? 0.51 +
+            (q - 0.5) * (warm ? -0.35 : 0.25) +
+            0.21 * Math.sin(q * 5.2 - phase * 0.43 + (warm ? 0 : 2.4))
+          : warm
+            ? column.warm
+            : column.cool - 0.075 * Math.sin(q * 12 + phase * 0.18);
         const rise =
           height * (base + transition * 0.045 * envelope * (warm ? 1 : -1)) +
           bend * (warm ? 1 : 0.65);
         const spread =
           height *
-          0.19 *
+          (rail ? 0.26 : 0.19) *
           (warm
             ? 0.65 + 0.34 * Math.sin(q * 5.2 + phase * 0.06)
             : 0.55 + 0.44 * Math.cos(q * 4.3 + phase * 0.055));
@@ -158,18 +177,21 @@ export function createSpectralDrawing(
       for (let lane = 0; lane < strands; lane++) {
         trace(
           lane,
-          lanes[lane]!.opacity * (landscape ? 2.8 : 1),
+          lanes[lane]!.opacity * (rail ? 2.1 : landscape ? 2.8 : 1),
           landscape ? 0.95 : 0.65,
         );
       }
-      const core = warm ? 10 : 13;
-      trace(core, theme === "Quartz" ? 0.05 : 0.1, 4.8);
-      trace(core, 0.86, 1.5);
+      const core = Math.round((strands - 1) * (warm ? 0.435 : 0.565));
+      if (!rail) trace(core, theme === "Quartz" ? 0.05 : 0.1, 4.8);
+      trace(core, rail ? 0.69 : 0.86, rail ? 1.05 : 1.5);
 
       ctx.fillStyle = `rgb(${color})`;
-      for (let i = 0; i < 37; i++) {
+      for (let i = 0; i < particles; i++) {
         const q =
-          (i * 0.1371 + phase * (0.003 + (i % 5) * 0.0003) + family * 0.43) % 1;
+          (i * 0.1371 +
+            phase * ((rail ? 0.022 : 0.003) + (i % 5) * 0.0003) +
+            family * 0.43) %
+          1;
         ctx.globalAlpha = (i % 9 === 0 ? 0.77 : 0.34) * Math.min(1, q * 5);
         ctx.beginPath();
         ctx.arc(
@@ -183,7 +205,7 @@ export function createSpectralDrawing(
       }
 
       ctx.globalAlpha = 1;
-      for (let i = family; i < nodes.length; i += 2) {
+      for (let i = family; !rail && i < nodes.length; i += 2) {
         const q = nodes[i]!;
         const x = q * width;
         const y = carrierY(q, core);

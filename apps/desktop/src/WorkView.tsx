@@ -4,19 +4,21 @@ import { VisualIcon, type IconName } from "./VisualIcon";
 export function WorkHeading({
   id,
   title,
-  description,
+  icon,
   actions,
 }: {
   id: string;
   title: string;
-  description?: string;
+  icon: IconName;
   actions?: ReactNode;
 }) {
   return (
     <header className="work-heading">
-      <div>
+      <div className="work-heading-title">
+        <span className="artifact-icon">
+          <VisualIcon name={icon} />
+        </span>
         <h2 id={id}>{title}</h2>
-        {description && <p>{description}</p>}
       </div>
       {actions && <div className="work-actions">{actions}</div>}
     </header>

@@ -1,7 +1,7 @@
 import type { PreviewId } from "../navigation";
 
 export const fixtureName = "Atlas · documentação técnica";
-export type Scenario = "ready" | "empty" | "error" | "unavailable";
+export type Scenario = "ready" | "medium" | "empty" | "error" | "unavailable";
 export type PreviewState =
   | { kind: "loading" }
   | { kind: "ready" }
@@ -13,7 +13,8 @@ export function readFixture(
   experience: PreviewId,
   scenario: Scenario,
 ): PreviewState {
-  if (scenario === "ready") return { kind: "ready" };
+  if (scenario === "ready" || (experience === "graph" && scenario === "medium"))
+    return { kind: "ready" };
   if (scenario === "empty") return { kind: "empty" };
   if (scenario === "error")
     return {
@@ -132,69 +133,6 @@ export const memoryRecords: readonly MemoryRecord[] = [
       },
     ],
   },
-];
-
-export type GraphKind = "Decisão" | "Fonte" | "Tarefa";
-export type GraphNode = {
-  id: string;
-  type: GraphKind;
-  name: string;
-  x: number;
-  y: number;
-  evidence: string;
-};
-export const graphNodes: readonly GraphNode[] = [
-  {
-    id: "n1",
-    type: "Decisão",
-    name: "Prova de continuidade",
-    x: 318,
-    y: 143,
-    evidence: "s3",
-  },
-  {
-    id: "n2",
-    type: "Fonte",
-    name: "Roteiro de retomada",
-    x: 102,
-    y: 66,
-    evidence: "s1",
-  },
-  {
-    id: "n3",
-    type: "Tarefa",
-    name: "Revisar a prova",
-    x: 527,
-    y: 72,
-    evidence: "s4",
-  },
-  {
-    id: "n4",
-    type: "Fonte",
-    name: "Relatório local",
-    x: 501,
-    y: 223,
-    evidence: "s2",
-  },
-  {
-    id: "n5",
-    type: "Tarefa",
-    name: "Checar alterações",
-    x: 110,
-    y: 222,
-    evidence: "s2",
-  },
-];
-export const graphEdges: readonly {
-  from: string;
-  to: string;
-  relation: string;
-}[] = [
-  { from: "n2", to: "n1", relation: "fundamenta" },
-  { from: "n1", to: "n3", relation: "orienta" },
-  { from: "n4", to: "n3", relation: "evidencia" },
-  { from: "n4", to: "n5", relation: "é inspecionado por" },
-  { from: "n5", to: "n1", relation: "verifica" },
 ];
 
 export const sessions = [

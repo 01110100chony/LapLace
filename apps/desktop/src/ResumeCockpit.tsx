@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import type {
   BindingVerificationState,
   ContextSnapshot,
@@ -20,7 +20,7 @@ import { errorMessage, type createDesktopClient } from "./ipc";
 import { createLatestRequest } from "./workspace";
 import { EmptyState } from "./WorkView";
 import { VisualIcon } from "./VisualIcon";
-
+import { EvidenceProof } from "./EvidenceProof";
 const timeFormat = new Intl.DateTimeFormat("pt-BR", {
   dateStyle: "short",
   timeStyle: "medium",
@@ -115,7 +115,6 @@ function makeRequestId(prefix: string) {
 }
 
 export function ResumeCockpit({
-  navigation,
   project,
   fallbackSummary,
   identity,
@@ -127,8 +126,8 @@ export function ResumeCockpit({
   decisionClient,
   onResumeUpdated,
   onViewChanges,
+  onViewGraph,
 }: {
-  navigation: ReactNode;
   project: ProjectRecord;
   fallbackSummary: GitObservation | undefined;
   identity: ProjectIdentityResult | null;
@@ -140,6 +139,7 @@ export function ResumeCockpit({
   decisionClient: ReturnType<typeof createDesktopClient>["decisions"];
   onResumeUpdated: () => void;
   onViewChanges: () => void;
+  onViewGraph?: () => void;
 }) {
   const [actionLatest] = useState(() => createLatestRequest());
   const [sourcesLatest] = useState(() => createLatestRequest());
@@ -478,7 +478,6 @@ export function ResumeCockpit({
   return (
     <div className="resume-surface">
       <div className="cockpit-strip">
-        {navigation}
         <div className="cockpit-header-meta resume-binding">
           {verification ? (
             <span className={`badge ${verification}`}>
@@ -567,6 +566,7 @@ export function ResumeCockpit({
         aria-labelledby="next-action-heading"
       >
         <div className="directive-label">
+          <VisualIcon name="activity" />
           <h2 id="next-action-heading">Próxima ação</h2>
           <span className="badge advisory">Sugestão</span>
         </div>
@@ -576,6 +576,26 @@ export function ResumeCockpit({
             <p className="next-action-rationale">
               {resume.nextAction.rationale}
             </p>
+            {!resume.nextAction.blockedByConflict &&
+              resume.nextAction.kind === "inspect_changes" && (
+                <button
+                  type="button"
+                  className="text-button directive-action"
+                  onClick={onViewChanges}
+                >
+                  Ver alterações <VisualIcon name="forward" />
+                </button>
+              )}
+            {!resume.nextAction.blockedByConflict &&
+              resume.nextAction.kind === "record_decision" && (
+                <button
+                  type="button"
+                  className="text-button directive-action"
+                  onClick={() => openForm(null)}
+                >
+                  Registrar decisão <VisualIcon name="forward" />
+                </button>
+              )}
             {resume.nextAction.blockedByConflict && (
               <p className="badge warning">
                 Sugestão dependente suspensa por conflito material
@@ -619,7 +639,9 @@ export function ResumeCockpit({
             aria-labelledby="decision-heading"
           >
             <div className="work-panel-heading">
-              <h2 id="decision-heading">Decisão vigente</h2>
+              <h2 id="decision-heading">
+                <VisualIcon name="decision" /> Decisão vigente
+              </h2>
               <button
                 className="button"
                 onClick={() => openForm(activeDecision)}
@@ -724,6 +746,15 @@ export function ResumeCockpit({
                     </button>
                   )}
                 </div>
+                {onViewGraph && (
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={onViewGraph}
+                  >
+                    <VisualIcon name="graph" /> Localizar decisão no KGraph
+                  </button>
+                )}
                 <details className="decision-maintenance">
                   <summary>Manutenção da decisão</summary>
                   <button
@@ -765,67 +796,7 @@ export function ResumeCockpit({
                   </div>
                 )}
 
-                {showingEvidence && (
-                  <div className="cockpit-evidence-box">
-                    <strong>
-                      Prova histórica preservada (
-                      {showingEvidence.evidence.state === "verified"
-                        ? showingEvidence.evidence.sourceOrigin ===
-                          "context_search"
-                          ? "índice C02"
-                          : "captura C01"
-                        : (evidenceGapBadges[showingEvidence.evidence.gap] ??
-                          `lacuna: ${showingEvidence.evidence.gap}`)}
-                      )
-                    </strong>
-                    {showingEvidence.evidence.ref && (
-                      <p className="observed">
-                        Caminho:{" "}
-                        <code>{showingEvidence.evidence.ref.path}</code>
-                        {showingEvidence.excerpt && (
-                          <>
-                            {" "}
-                            ·{" "}
-                            {formatLineRange(
-                              showingEvidence.excerpt.firstLine,
-                              showingEvidence.excerpt.lastLine,
-                            )}
-                          </>
-                        )}{" "}
-                        · SHA-256{" "}
-                        <code>
-                          {showingEvidence.evidence.ref.sha256.slice(0, 12)}
-                        </code>{" "}
-                        · Cobertura:{" "}
-                        {coverageLabels[showingEvidence.evidence.coverage] ??
-                          showingEvidence.evidence.coverage}
-                        {showingEvidence.evidence.capturedAt && (
-                          <>
-                            {" "}
-                            · Capturada em{" "}
-                            {formatTimestamp(
-                              showingEvidence.evidence.capturedAt,
-                            )}
-                          </>
-                        )}
-                      </p>
-                    )}
-                    {showingEvidence.excerpt ? (
-                      <pre className="cockpit-excerpt">
-                        {showingEvidence.excerpt.text}
-                      </pre>
-                    ) : (
-                      <p>
-                        Sem trecho disponível devido a{" "}
-                        {showingEvidence.evidence.state === "gap"
-                          ? (evidenceGapLabels[showingEvidence.evidence.gap] ??
-                            showingEvidence.evidence.gap)
-                          : "lacuna"}
-                        .
-                      </p>
-                    )}
-                  </div>
-                )}
+                {showingEvidence && <EvidenceProof proof={showingEvidence} />}
 
                 {showingCompare && (
                   <div className="cockpit-evidence-box">

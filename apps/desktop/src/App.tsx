@@ -19,8 +19,10 @@ import { CloneDialog } from "./CloneDialog";
 import { AppTitleBar } from "./AppTitleBar";
 import {
   initialPause,
+  initialShellMode,
   initialTheme,
   savePause,
+  saveShellMode,
   saveTheme,
   type Theme,
 } from "./appearance";
@@ -34,7 +36,7 @@ import {
 } from "./views";
 import { createResumeLoader } from "./workspace";
 import { CommandPalette, type Command } from "./CommandPalette";
-import { DesktopNavigation } from "./DesktopNavigation";
+import { ShellNavigation } from "./ShellNavigation";
 import { SettingsView } from "./SettingsView";
 import {
   previewDestinations,
@@ -44,6 +46,7 @@ import {
   type Route,
 } from "./navigation";
 import type { TaskProposal } from "./TaskView";
+import { LambdaMark, VisualIcon } from "./VisualIcon";
 
 const PreviewLab = lazy(() => import("./preview/PreviewLab"));
 
@@ -76,17 +79,26 @@ export function App() {
   >({});
   const [selection, setSelection] = useState<Selection | null>(null);
   const [recentId, setRecentId] = useState<string>();
+  const [recentResume, setRecentResume] = useState<ResumeSummary | null>(null);
   const [service, setService] = useState<ServiceStatus>({ state: "loading" });
   const [theme, setTheme] = useState(initialTheme);
   const [paused, setPaused] = useState(initialPause);
+  const [shellMode, setShellMode] = useState(initialShellMode);
+  const [narrow, setNarrow] = useState(
+    () => matchMedia("(max-width: 760px)").matches,
+  );
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const spectralPhase = useRef(0);
+  const railPhase = useRef(0);
   const [route, setRoute] = useState<Route>({ kind: "workspace" });
   const [section, setSection] = useState<ProjectSection>("overview");
+  const [graphFocus, setGraphFocus] = useState<string>();
   const [taskProposal, setTaskProposal] = useState<TaskProposal>();
   const [loader] = useState(() => createResumeLoader(desktop));
   const cloneDialog = useRef<HTMLDialogElement>(null);
   const importDialog = useRef<HTMLDialogElement>(null);
   const relocateDialog = useRef<HTMLDialogElement>(null);
+  const navigationDrawer = useRef<HTMLDialogElement>(null);
   const main = useRef<HTMLElement>(null);
   const paletteTrigger = useRef<HTMLButtonElement>(null);
   const focusOnNavigation = useRef(false);
@@ -97,6 +109,30 @@ export function App() {
   useLayoutEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
+
+  useEffect(() => {
+    const media = matchMedia("(max-width: 760px)");
+    function update(event: MediaQueryListEvent) {
+      if (!event.matches) {
+        navigationDrawer.current?.close();
+        setDrawerOpen(false);
+      }
+      setNarrow(event.matches);
+    }
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  function toggleNavigation() {
+    if (narrow) {
+      navigationDrawer.current?.showModal();
+      setDrawerOpen(true);
+      return;
+    }
+    const mode = shellMode === "compact" ? "expanded" : "compact";
+    setShellMode(mode);
+    saveShellMode(mode);
+  }
 
   function changeTheme(next: Theme) {
     setTheme(next);
@@ -111,6 +147,7 @@ export function App() {
   const inspect = useCallback(
     (project: ProjectRecord) => {
       setRecentId(project.id);
+      setRecentResume(null);
       setSelection({
         id: project.id,
         status: { state: "loading" },
@@ -132,6 +169,7 @@ export function App() {
           );
         },
         (resume) => {
+          setRecentResume(resume);
           setProjects((items) =>
             updateProject(items, {
               id: project.id,
@@ -203,12 +241,14 @@ export function App() {
 
   useEffect(() => {
     if (focusOnNavigation.current) {
-      main.current?.focus();
+      window.scrollTo(0, 0);
+      main.current?.focus({ preventScroll: true });
       focusOnNavigation.current = false;
     }
   }, [activeId, route, section]);
 
   function goHome() {
+    navigationDrawer.current?.close();
     if (route.kind !== "workspace") focusOnNavigation.current = true;
     loader.invalidate();
     setSelection(null);
@@ -222,35 +262,44 @@ export function App() {
     openProject(project);
   }
 
-  function openProject(project: ProjectRecord) {
+  function openProject(
+    project: ProjectRecord,
+    next: ProjectSection = "overview",
+  ) {
+    navigationDrawer.current?.close();
     if (
       route.kind !== "project" ||
       selection?.id !== project.id ||
-      section !== "overview"
+      section !== next
     )
       focusOnNavigation.current = true;
     setTaskProposal(undefined);
-    setSection("overview");
+    setSection(next);
+    setGraphFocus(undefined);
     setRoute({ kind: "project" });
     inspect(project);
   }
 
-  function showSection(next: ProjectSection) {
+  function showSection(next: ProjectSection, focus?: string) {
+    navigationDrawer.current?.close();
     if (route.kind !== "project" || next !== section) {
       focusOnNavigation.current = true;
       setTaskProposal(undefined);
     }
     setSection(next);
+    setGraphFocus(focus);
     setRoute({ kind: "project" });
   }
 
-  function openLab(preview?: PreviewId) {
+  function openLab(preview?: PreviewId, focus?: string) {
+    navigationDrawer.current?.close();
     focusOnNavigation.current = true;
     setTaskProposal(undefined);
-    setRoute({ kind: "lab", preview });
+    setRoute({ kind: "lab", preview, focus });
   }
 
   function openSettings() {
+    navigationDrawer.current?.close();
     focusOnNavigation.current = true;
     setTaskProposal(undefined);
     setRoute({ kind: "settings" });
@@ -278,6 +327,13 @@ export function App() {
       scope: "Workspace",
       icon: "settings",
       action: openSettings,
+    },
+    {
+      id: "lab",
+      label: "Laboratório",
+      scope: "Prévia",
+      icon: "lab",
+      action: () => openLab(),
     },
     ...projects.map((project): Command => ({
       id: "project/" + project.id,
@@ -330,30 +386,82 @@ export function App() {
         : route.kind === "settings"
           ? "Preferências"
           : "Área de trabalho";
+  const graphRoute =
+    (route.kind === "project" && section === "graph") ||
+    (route.kind === "lab" && route.preview === "graph");
+  const navigation = (
+    <ShellNavigation
+      id={narrow ? undefined : "desktop-navigation"}
+      route={route}
+      section={section}
+      active={active}
+      projects={projects}
+      service={service}
+      theme={theme}
+      paused={paused}
+      phase={railPhase}
+      compact={!narrow && shellMode === "compact"}
+      onWorkspace={goHome}
+      onProject={openProject}
+      onSection={showSection}
+      onLab={openLab}
+      onSettings={openSettings}
+    />
+  );
 
   return (
-    <div className="frame living-shell" data-motion-paused={paused}>
+    <div
+      className="frame living-shell"
+      data-motion-paused={paused}
+      data-shell={shellMode}
+      data-graph-route={graphRoute}
+    >
       <a className="skip-link" href="#content">
         Ir para o conteúdo
       </a>
       <AppTitleBar
         projectName={route.kind === "project" ? active?.name : undefined}
         locationLabel={locationLabel}
-        isPreview={route.kind === "lab"}
+        isPreview={route.kind === "lab" && !!route.preview}
         paused={paused}
         onTogglePause={togglePause}
         paletteTrigger={paletteTrigger}
+        shellMode={shellMode}
+        narrow={narrow}
+        drawerOpen={drawerOpen}
+        toggleNavigation={toggleNavigation}
       />
-      <DesktopNavigation
-        route={route}
-        active={active}
-        projects={projects}
-        service={service}
-        onWorkspace={goHome}
-        onProject={openProject}
-        onLab={openLab}
-        onSettings={openSettings}
-      />
+      {narrow ? (
+        <dialog
+          id="navigation-drawer"
+          ref={navigationDrawer}
+          className="shell-drawer"
+          aria-labelledby="navigation-heading"
+          onClose={() => setDrawerOpen(false)}
+          onClick={(event) => {
+            if (event.target === event.currentTarget)
+              navigationDrawer.current?.close();
+          }}
+        >
+          <header className="shell-drawer-heading">
+            <h2 id="navigation-heading">
+              <LambdaMark /> LapLace
+            </h2>
+            <button
+              type="button"
+              className="shell-icon-button"
+              autoFocus
+              aria-label="Fechar navegação"
+              onClick={() => navigationDrawer.current?.close()}
+            >
+              <VisualIcon name="close" />
+            </button>
+          </header>
+          {navigation}
+        </dialog>
+      ) : (
+        navigation
+      )}
 
       <div className="workspace">
         <main ref={main} id="content" tabIndex={-1} className="main">
@@ -367,6 +475,7 @@ export function App() {
             >
               <PreviewLab
                 preview={route.preview}
+                focus={route.focus}
                 navigate={openLab}
                 index={() => openLab()}
               />
@@ -392,6 +501,7 @@ export function App() {
               paused={paused}
               spectralPhase={spectralPhase}
               section={section}
+              graphFocus={graphFocus}
               taskProposal={taskProposal}
               onTaskProposal={(source, objective) => {
                 setTaskProposal({ source, objective });
@@ -417,6 +527,7 @@ export function App() {
               projects={projects}
               summaries={summaries}
               recent={recent}
+              recentResume={recentResume}
               service={service}
               theme={theme}
               paused={paused}

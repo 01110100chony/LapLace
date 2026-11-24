@@ -8,11 +8,13 @@ export function SpectralField({
   paused,
   phase,
   scene,
+  compact = false,
 }: {
   theme: Theme;
   paused: boolean;
   phase: RefObject<number>;
   scene: string;
+  compact?: boolean;
 }) {
   const surface = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -22,7 +24,11 @@ export function SpectralField({
     transition.current = 1;
   }, [scene]);
 
-  const landscape = scene === "workspace";
+  const variant = compact
+    ? "rail"
+    : scene === "workspace"
+      ? "landscape"
+      : "project";
 
   useEffect(() => {
     const area = surface.current;
@@ -30,7 +36,7 @@ export function SpectralField({
     const ctx = target?.getContext("2d");
     if (!area || !target || !ctx) return;
 
-    const drawing = createSpectralDrawing(ctx, theme, landscape);
+    const drawing = createSpectralDrawing(ctx, theme, variant);
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
     const pointer = { x: 0.5, y: 0.5, influence: 0 };
     let targetX = 0.5;
@@ -46,6 +52,10 @@ export function SpectralField({
     let resolution = readResolution();
 
     function animate(time: number) {
+      if (compact && lastTime && time - lastTime < 32) {
+        frame = requestAnimationFrame(animate);
+        return;
+      }
       const elapsed = lastTime ? Math.min(time - lastTime, 50) : 0;
       lastTime = time;
       phase.current += elapsed * 0.00078;
@@ -74,7 +84,7 @@ export function SpectralField({
     const resize = () => {
       const { width: w, height: h } = area.getBoundingClientRect();
       if (!w || !h) return;
-      const scale = Math.min(devicePixelRatio || 1, 1.75);
+      const scale = Math.min(devicePixelRatio || 1, compact ? 1.35 : 1.75);
       const pixelWidth = Math.max(1, Math.round(w * scale));
       const pixelHeight = Math.max(1, Math.round(h * scale));
       if (
@@ -143,14 +153,16 @@ export function SpectralField({
       area.removeEventListener("pointermove", move);
       area.removeEventListener("pointerleave", leave);
     };
-  }, [theme, paused, phase, landscape]);
+  }, [theme, paused, phase, variant, compact]);
 
   return (
     <div ref={surface} className="spectral-field" aria-hidden="true">
       <canvas ref={canvas} />
-      <div className="spectral-seal">
-        <LambdaMark />
-      </div>
+      {!compact && (
+        <div className="spectral-seal">
+          <LambdaMark />
+        </div>
+      )}
     </div>
   );
 }

@@ -1,9 +1,10 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { previewDestinations, type PreviewId } from "../navigation";
-import { VisualIcon } from "../VisualIcon";
+import { VisualIcon, type IconName } from "../VisualIcon";
+import { WorkHeading } from "../WorkView";
 import { findSource } from "./fixtures";
 
-export type NavigatePreview = (id: PreviewId) => void;
+export type NavigatePreview = (id: PreviewId, focus?: string) => void;
 
 export function PreviewLinks({
   ids,
@@ -33,14 +34,21 @@ export function PreviewLinks({
 
 export function PreviewSection({
   title,
+  icon,
   children,
 }: {
   title: string;
+  icon?: IconName;
   children: ReactNode;
 }) {
+  const heading = useId();
   return (
-    <section className="preview-section">
-      <h2>{title}</h2>
+    <section className="preview-section" aria-labelledby={heading}>
+      {icon ? (
+        <WorkHeading id={heading} title={title} icon={icon} />
+      ) : (
+        <h2 id={heading}>{title}</h2>
+      )}
       {children}
     </section>
   );

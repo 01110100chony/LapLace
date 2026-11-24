@@ -85,6 +85,14 @@
   --shadow: #07050b35;
   --graph-source: #7ed4c5;
   --graph-task: #bdabf3;
+  --outline: #ddd1f522;
+  --outline-strong: #ddd1f54a;
+  --surface-chrome: #15131c;
+  --surface-canvas: #13121c;
+  --graph-grid: #d7c7f13f;
+  --graph-line: #9783b0;
+  --graph-record: #aab9f4;
+  --graph-atmosphere: #6e45832a;
 }
 
 :root[data-theme="Astra"] {
@@ -114,6 +122,14 @@
   --shadow: #090d163a;
   --graph-source: #81d8c5;
   --graph-task: #c1b5f8;
+  --outline: #b7d9f629;
+  --outline-strong: #b7d9f64d;
+  --surface-chrome: #141d2a;
+  --surface-canvas: #101a27;
+  --graph-grid: #b7d9f63d;
+  --graph-line: #7299b8;
+  --graph-record: #a9cafa;
+  --graph-atmosphere: #3d748b29;
 }
 
 :root[data-theme="Quartz"] {
@@ -144,4 +160,12 @@
   --shadow: #5b483111;
   --graph-source: #246b60;
   --graph-task: #69529b;
+  --outline: #4631272b;
+  --outline-strong: #46312757;
+  --surface-chrome: #f1ebe2;
+  --surface-canvas: #f7f2e9;
+  --graph-grid: #6353544d;
+  --graph-line: #806b85;
+  --graph-record: #3c598b;
+  --graph-atmosphere: #c4ac8c35;
 }

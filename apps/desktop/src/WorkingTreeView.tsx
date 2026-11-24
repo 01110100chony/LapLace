@@ -330,8 +330,8 @@ export function WorkingTreeView({
     <section className="git-surface" aria-labelledby="working-heading">
       <WorkHeading
         id="working-heading"
-        title="Alterações Git"
-        description="Inspecione o checkout e compare versões preservadas."
+        title="Árvore e comparação"
+        icon="git"
         actions={
           <button
             className="button"

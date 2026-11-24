@@ -1,8 +1,10 @@
 export const themes = ["Noir", "Astra", "Quartz"] as const;
 export type Theme = (typeof themes)[number];
+export type ShellMode = "expanded" | "compact";
 
 const themeKey = "laplace.theme";
 const pauseKey = "laplace.spectral-paused";
+const shellKey = "laplace.shell-mode";
 
 function readPreference(key: string) {
   try {
@@ -35,4 +37,12 @@ export function initialPause() {
 
 export function savePause(paused: boolean) {
   savePreference(pauseKey, String(paused));
+}
+
+export function initialShellMode(): ShellMode {
+  return readPreference(shellKey) === "compact" ? "compact" : "expanded";
+}
+
+export function saveShellMode(mode: ShellMode) {
+  savePreference(shellKey, mode);
 }

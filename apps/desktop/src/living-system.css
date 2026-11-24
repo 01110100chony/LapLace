@@ -1131,72 +1131,6 @@ kbd {
   }
 }
 
-.rail-field {
-  position: relative;
-  height: clamp(50px, 8vh, 92px);
-  overflow: hidden;
-  pointer-events: none;
-  color: var(--seal);
-  mask-image: linear-gradient(
-    to right,
-    transparent,
-    black 12%,
-    black 85%,
-    transparent
-  );
-}
-.rail-field::before {
-  content: "";
-  position: absolute;
-  inset: 0 -14% -15%;
-  background: radial-gradient(
-    ellipse at 44% 74%,
-    color-mix(in srgb, var(--seal) 17%, transparent),
-    transparent 56%
-  );
-}
-.rail-field svg {
-  position: absolute;
-  inset: 0 -5%;
-  width: 110%;
-  height: 100%;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 0.75;
-  opacity: 0.62;
-}
-.rail-field path:nth-child(3n) {
-  opacity: 0.52;
-}
-@media (prefers-reduced-motion: no-preference) {
-  .rail-field svg,
-  .rail-field::before {
-    animation: rail-tide 9s ease-in-out infinite alternate;
-    transform-origin: 45% 90%;
-  }
-  .rail-field::before {
-    animation-direction: alternate-reverse;
-    animation-duration: 13s;
-  }
-  [data-motion-paused="true"] .rail-field svg,
-  [data-motion-paused="true"] .rail-field::before {
-    animation-play-state: paused;
-  }
-}
-@keyframes rail-tide {
-  from {
-    transform: translateX(-3%) scaleY(0.83);
-  }
-  to {
-    transform: translateX(3%) scaleY(1.06);
-  }
-}
-@media (max-height: 570px) {
-  .rail-field {
-    display: none;
-  }
-}
-
 .rail-system {
   display: flex;
   align-items: center;
@@ -1363,7 +1297,6 @@ kbd {
   }
 }
 @media (max-width: 760px) {
-  .rail-field,
   .rail-system {
     display: none;
   }

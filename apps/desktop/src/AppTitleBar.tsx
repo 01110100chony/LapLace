@@ -5,6 +5,7 @@ import {
 } from "@tauri-apps/api/window";
 import { useEffect, useState, type RefObject } from "react";
 import { LambdaMark, VisualIcon } from "./VisualIcon";
+import type { ShellMode } from "./appearance";
 
 type TitleBarProps = {
   projectName?: string;
@@ -13,6 +14,10 @@ type TitleBarProps = {
   paused: boolean;
   onTogglePause: () => void;
   paletteTrigger: RefObject<HTMLButtonElement | null>;
+  shellMode: ShellMode;
+  narrow: boolean;
+  drawerOpen: boolean;
+  toggleNavigation: () => void;
 };
 
 const appWindow = isTauri() ? getCurrentWindow() : undefined;
@@ -108,6 +113,10 @@ export function AppTitleBar({
   paused,
   onTogglePause,
   paletteTrigger,
+  shellMode,
+  narrow,
+  drawerOpen,
+  toggleNavigation,
 }: TitleBarProps) {
   const [frameless, setFrameless] = useState(false);
 
@@ -125,6 +134,12 @@ export function AppTitleBar({
     };
   }, []);
 
+  const navigationLabel = narrow
+    ? "Abrir navegação"
+    : shellMode === "compact"
+      ? "Expandir navegação"
+      : "Recolher navegação";
+
   return (
     <header className="app-titlebar">
       <div className="brand" data-tauri-drag-region={frameless || undefined}>
@@ -135,8 +150,32 @@ export function AppTitleBar({
         >
           <LambdaMark />
         </span>
-        LapLace
+        <span
+          className="brand-name"
+          data-tauri-drag-region={frameless || undefined}
+        >
+          LapLace
+        </span>
       </div>
+      <button
+        type="button"
+        className="shell-icon-button shell-toggle"
+        aria-label={navigationLabel}
+        title={navigationLabel}
+        aria-controls={narrow ? "navigation-drawer" : "desktop-navigation"}
+        aria-expanded={narrow ? drawerOpen : shellMode === "expanded"}
+        onClick={toggleNavigation}
+      >
+        <VisualIcon
+          name={
+            narrow
+              ? "menu"
+              : shellMode === "expanded"
+                ? "panelCollapse"
+                : "panel"
+          }
+        />
+      </button>
       <div className="breadcrumb" aria-label="Localização atual">
         {(projectName || isPreview) && (
           <>
@@ -144,7 +183,7 @@ export function AppTitleBar({
               {projectName ?? "Laboratório"}
             </span>
             <span className="breadcrumb-separator" aria-hidden="true">
-              /
+              <VisualIcon name="chevron" />
             </span>
           </>
         )}
@@ -164,13 +203,15 @@ export function AppTitleBar({
         aria-keyshortcuts="Control+K Meta+K"
         ref={paletteTrigger}
       >
-        <VisualIcon name="search" /> <span>Buscar ou executar</span>{" "}
+        <VisualIcon name="search" /> <span>Navegação rápida</span>{" "}
         <kbd>Ctrl K</kbd>
       </button>
       <button
         type="button"
         className="shell-motion"
-        aria-label="Pausar campo espectral"
+        aria-label={
+          paused ? "Retomar campo espectral" : "Pausar campo espectral"
+        }
         aria-pressed={paused}
         title={paused ? "Retomar campo espectral" : "Pausar campo espectral"}
         onClick={onTogglePause}

@@ -62,7 +62,7 @@ function SourcePreview({
     >
       <header className="section-heading">
         <h4 id="context-preview-heading" ref={heading} tabIndex={-1}>
-          Fonte preservada
+          <VisualIcon name="file" /> Fonte preservada
         </h4>
         <button className="button" onClick={offer}>
           Disponibilizar trecho para consulta

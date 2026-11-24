@@ -5,6 +5,7 @@ export const projectDestinations = [
   { id: "context", label: "Contexto", icon: "archive" },
   { id: "tasks", label: "Tarefas", icon: "tasks" },
   { id: "working", label: "Alterações Git", icon: "git" },
+  { id: "graph", label: "KGraph", icon: "graph" },
 ] as const satisfies readonly { id: string; label: string; icon: IconName }[];
 
 export type ProjectSection = (typeof projectDestinations)[number]["id"];
@@ -86,4 +87,4 @@ export type Route =
   | { kind: "workspace" }
   | { kind: "project" }
   | { kind: "settings" }
-  | { kind: "lab"; preview?: PreviewId };
+  | { kind: "lab"; preview?: PreviewId; focus?: string };

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { GraphTeaser } from "../graph/GraphTeaser";
 import { previewDestinations, type PreviewId } from "../navigation";
 import { VisualIcon } from "../VisualIcon";
 import { EmptyState } from "../WorkView";
@@ -9,54 +10,38 @@ import {
   type Scenario,
 } from "./fixtures";
 import { HypothesisArena, TemporalReplay } from "./History";
-import { ContextCompiler, KnowledgeGraph, MemoryExplorer } from "./Knowledge";
+import { ContextCompiler, MemoryExplorer } from "./Knowledge";
 import { AgentCenter, GitPlanner, MemoryInbox, PreFlight } from "./Operations";
+import { PreviewGraph } from "./PreviewGraph";
 import type { NavigatePreview } from "./Shared";
 
 const experiences = {
   memory: {
-    description: "Leia uma decisão, percorra suas revisões e siga até a prova.",
+    description: "Decisões, revisões e fontes",
     Screen: MemoryExplorer,
   },
-  graph: {
-    description: "Navegue pelas relações que ligam decisões, fontes e tarefas.",
-    Screen: KnowledgeGraph,
-  },
+  graph: { description: "Relações do acervo de exemplo", Screen: PreviewGraph },
   compiler: {
-    description: "Componha um manifesto local com seleção e orçamento.",
+    description: "Manifesto, fontes e orçamento",
     Screen: ContextCompiler,
   },
-  inbox: {
-    description: "Inspecione propostas de memória e revise conflitos.",
-    Screen: MemoryInbox,
-  },
+  inbox: { description: "Propostas e conflitos", Screen: MemoryInbox },
   agents: {
-    description: "Acompanhe capacidades, tentativas e resultados em revisão.",
+    description: "Sessões e revisão de resultados",
     Screen: AgentCenter,
   },
-  planner: {
-    description: "Organize as etapas e revise as precondições de um plano.",
-    Screen: GitPlanner,
-  },
-  preflight: {
-    description: "Confira escopo, fontes, risco e destino antes de revisar.",
-    Screen: PreFlight,
-  },
-  arena: {
-    description: "Compare o resultado e o custo de hipóteses concorrentes.",
-    Screen: HypothesisArena,
-  },
+  planner: { description: "Etapas, precondições e risco", Screen: GitPlanner },
+  preflight: { description: "Escopo, fontes e destino", Screen: PreFlight },
+  arena: { description: "Comparação de hipóteses", Screen: HypothesisArena },
   replay: {
-    description: "Compare o estado conhecido e a vigência em dois momentos.",
+    description: "Vigência e registro das revisões",
     Screen: TemporalReplay,
   },
-} satisfies Record<
-  PreviewId,
-  { description: string; Screen: typeof MemoryExplorer }
->;
+};
 
 const scenarios: Record<Scenario, string> = {
   ready: "Dados de exemplo",
+  medium: "Grafo médio",
   empty: "Sem registros",
   error: "Falha de leitura",
   unavailable: "Indisponível",
@@ -66,9 +51,11 @@ const groups = [...new Set(previewDestinations.map((item) => item.group))];
 function Experiment({
   preview,
   navigate,
+  focus,
 }: {
   preview: PreviewId;
   navigate: NavigatePreview;
+  focus?: string;
 }) {
   const [request, setRequest] = useState({
     scenario: "ready" as Scenario,
@@ -78,12 +65,12 @@ function Experiment({
     revision: number;
     state: PreviewState;
   }>();
-  const { Screen, description } = experiences[preview];
   const entry = previewDestinations.find((item) => item.id === preview)!;
   const state =
     response?.revision === request.revision
       ? response.state
       : { kind: "loading" as const };
+  const graph = preview === "graph";
 
   useEffect(() => {
     const timer = window.setTimeout(
@@ -92,7 +79,7 @@ function Experiment({
           revision: request.revision,
           state: readFixture(preview, request.scenario),
         }),
-      180,
+      150,
     );
     return () => window.clearTimeout(timer);
   }, [preview, request]);
@@ -101,29 +88,46 @@ function Experiment({
     setRequest((current) => ({ scenario, revision: current.revision + 1 }));
   }
 
+  const scenarioControl = (
+    <label className="preview-input scenario-control">
+      <span>Cenário de prévia</span>
+      <select
+        value={request.scenario}
+        onChange={(event) => chooseScenario(event.target.value as Scenario)}
+      >
+        {Object.entries(scenarios)
+          .filter(([id]) => id !== "medium" || graph)
+          .map(([id, label]) => (
+            <option value={id} key={id}>
+              {label}
+            </option>
+          ))}
+      </select>
+    </label>
+  );
+
+  if (state.kind === "ready" && graph)
+    return (
+      <PreviewGraph
+        navigate={navigate}
+        focus={focus}
+        isMedium={request.scenario === "medium"}
+        tools={scenarioControl}
+      />
+    );
+
+  const Screen = preview !== "graph" ? experiences[preview].Screen : null;
   return (
     <div className="preview-experiment">
       <header className="surface-intro preview-heading">
         <div>
           <p className="eyebrow">
-            <VisualIcon name={entry.icon} /> {entry.group}
+            <VisualIcon name={entry.icon} />{" "}
+            {graph ? "Prévia · " + fixtureName : entry.group}
           </p>
           <h1>{entry.label}</h1>
-          <p>{description}</p>
         </div>
-        <label className="preview-input scenario-control">
-          <span>Cenário de prévia</span>
-          <select
-            value={request.scenario}
-            onChange={(event) => chooseScenario(event.target.value as Scenario)}
-          >
-            {Object.entries(scenarios).map(([id, label]) => (
-              <option value={id} key={id}>
-                {label}
-              </option>
-            ))}
-          </select>
-        </label>
+        {scenarioControl}
       </header>
       <div className="preview-content" aria-busy={state.kind === "loading"}>
         {state.kind === "loading" && (
@@ -132,13 +136,24 @@ function Experiment({
           </p>
         )}
         {state.kind === "empty" && (
-          <EmptyState icon={entry.icon} title="A fixture está vazia">
-            Use o cenário Dados de exemplo para explorar a experiência.
+          <EmptyState
+            icon={entry.icon}
+            title={
+              graph ? "Nenhum nó no cenário" : "Nenhum registro no cenário"
+            }
+          >
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => chooseScenario("ready")}
+            >
+              Abrir dados de exemplo
+            </button>
           </EmptyState>
         )}
         {state.kind === "error" && (
           <div className="error-banner" role="alert">
-            {state.message}{" "}
+            {state.message}
             <button
               type="button"
               className="text-button"
@@ -153,7 +168,9 @@ function Experiment({
             {state.message}
           </EmptyState>
         )}
-        {state.kind === "ready" && <Screen navigate={navigate} />}
+        {state.kind === "ready" && Screen && (
+          <Screen navigate={navigate} focus={focus} />
+        )}
       </div>
     </div>
   );
@@ -161,62 +178,77 @@ function Experiment({
 
 export default function PreviewLab({
   preview,
+  focus,
   navigate,
   index,
 }: {
   preview?: PreviewId;
+  focus?: string;
   navigate: NavigatePreview;
   index: () => void;
 }) {
   return (
     <div className="preview-lab">
-      <div className="lab-status">
-        <span>
-          <VisualIcon name="lab" /> Prévia <small>{fixtureName}</small>
-        </span>
-        {preview && (
-          <button type="button" className="text-button" onClick={index}>
-            Todas as experiências
-          </button>
-        )}
-      </div>
+      {preview && preview !== "graph" && (
+        <div className="lab-status">
+          <span>
+            <VisualIcon name="lab" /> Prévia · dados de exemplo
+          </span>
+          {preview && (
+            <button type="button" className="text-button" onClick={index}>
+              Todas as experiências
+            </button>
+          )}
+        </div>
+      )}
       {preview ? (
-        <Experiment key={preview} preview={preview} navigate={navigate} />
+        <Experiment
+          key={preview + (focus ?? "")}
+          preview={preview}
+          focus={focus}
+          navigate={navigate}
+        />
       ) : (
         <>
           <header className="surface-intro lab-intro">
             <h1>Laboratório</h1>
-            <p>
-              Explore as experiências futuras em um projeto demonstrativo, com
-              dados isolados do catálogo local.
-            </p>
+            <span className="lab-mode">
+              <VisualIcon name="lab" /> Prévia · dados de exemplo
+            </span>
           </header>
-          <div className="lab-index">
-            {groups.map((group) => (
-              <section key={group}>
-                <h2>{group}</h2>
-                <ul>
-                  {previewDestinations
-                    .filter((item) => item.group === group)
-                    .map((item) => (
-                      <li key={item.id}>
-                        <button
-                          className="lab-destination"
-                          type="button"
-                          onClick={() => navigate(item.id)}
-                        >
-                          <VisualIcon name={item.icon} />
-                          <span>
-                            <strong>{item.label}</strong>
-                            <small>{experiences[item.id].description}</small>
-                          </span>
-                          <VisualIcon name="chevron" />
-                        </button>
-                      </li>
-                    ))}
-                </ul>
-              </section>
-            ))}
+          <div className="lab-layout">
+            <GraphTeaser preview onOpen={() => navigate("graph")} />
+            <div className="lab-index">
+              {groups.map((group) => (
+                <section key={group}>
+                  <h2>{group}</h2>
+                  <ul>
+                    {previewDestinations
+                      .filter(
+                        (item) => item.group === group && item.id !== "graph",
+                      )
+                      .map((item) => (
+                        <li key={item.id}>
+                          <button
+                            className="lab-destination"
+                            type="button"
+                            onClick={() => navigate(item.id)}
+                          >
+                            <span className="artifact-icon">
+                              <VisualIcon name={item.icon} />
+                            </span>
+                            <span>
+                              <strong>{item.label}</strong>
+                              <small>{experiences[item.id].description}</small>
+                            </span>
+                            <VisualIcon name="chevron" />
+                          </button>
+                        </li>
+                      ))}
+                  </ul>
+                </section>
+              ))}
+            </div>
           </div>
         </>
       )}

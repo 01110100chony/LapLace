@@ -291,7 +291,8 @@ export function TaskView({
     <section className="tasks-surface" aria-labelledby="task-heading">
       <WorkHeading
         id="task-heading"
-        title="Tarefas"
+        title="Fila do projeto"
+        icon="tasks"
         actions={
           <>
             <button type="button" className="button" onClick={openAgents}>

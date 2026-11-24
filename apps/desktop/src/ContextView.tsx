@@ -300,8 +300,8 @@ export function ContextView({
     >
       <WorkHeading
         id="context-heading"
-        title="Contexto"
-        description="Pesquise nas capturas e confira a origem das evidências."
+        title="Arquivos e capturas"
+        icon="archive"
         actions={
           <button
             className="button"
