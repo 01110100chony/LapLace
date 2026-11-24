@@ -477,7 +477,9 @@ export function App() {
                 preview={route.preview}
                 focus={route.focus}
                 navigate={openLab}
-                index={() => openLab()}
+                theme={theme}
+                paused={paused}
+                spectralPhase={spectralPhase}
               />
             </Suspense>
           ) : route.kind === "settings" ? (

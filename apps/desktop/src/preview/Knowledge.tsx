@@ -1,6 +1,7 @@
 import { VisualIcon } from "../VisualIcon";
 import { useState } from "react";
 import { memoryRecords, sources } from "./fixtures";
+import { BudgetSpectrum, RevisionStrata } from "./Instruments";
 import {
   Evidence,
   PreviewLinks,
@@ -65,23 +66,11 @@ export function MemoryExplorer({
         {active && revision ? (
           <>
             <p className="preview-detail-title">{active.title}</p>
-            <div
-              role="group"
-              aria-label="Revisões do registro"
-              className="preview-switch"
-            >
-              {active.revisions.map((item) => (
-                <button
-                  type="button"
-                  key={item.version}
-                  aria-pressed={revision.version === item.version}
-                  onClick={() => setVersion(item.version)}
-                >
-                  Revisão {item.version}
-                </button>
-              ))}
-            </div>
-            <p className="preview-muted">Observada em {revision.observed}</p>
+            <RevisionStrata
+              record={active}
+              selected={revision.version}
+              onSelect={setVersion}
+            />
             <p className="preview-reading">{revision.content}</p>
             <Evidence id={active.source} />
             <div className="preview-related">
@@ -162,21 +151,13 @@ export function ContextCompiler({ navigate }: { navigate: NavigatePreview }) {
         </label>
       </PreviewSection>
       <PreviewSection title="Manifesto de exemplo">
-        <p className="preview-number">
-          {used} <small>de {budget} tokens estimados</small>
-        </p>
-        <progress
-          className="budget-progress"
-          value={used}
-          max={budget}
-          aria-label="Orçamento utilizado"
-        />
+        <BudgetSpectrum manifest={manifest} budget={budget} />
         {manifest.length ? (
           <ul className="preview-events">
             {manifest.map((source) => (
               <li key={source.id}>
                 <code>{source.path}</code>
-                <small>
+                <small data-included={source.included}>
                   {source.included
                     ? "Incluída por inteiro"
                     : "Omitida pelo limite"}

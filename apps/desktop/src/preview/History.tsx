@@ -1,17 +1,14 @@
 import { useState } from "react";
 import { TextComparison } from "../TextComparison";
 import { hypotheses, replayEvents } from "./fixtures";
-import {
-  PreviewLinks,
-  PreviewRow,
-  PreviewSection,
-  type NavigatePreview,
-} from "./Shared";
+import { Chronoscope, DivergenceField } from "./Instruments";
+import { PreviewLinks, PreviewSection, type NavigatePreview } from "./Shared";
 
 export function HypothesisArena({ navigate }: { navigate: NavigatePreview }) {
   const [visible, setVisible] = useState<string[]>(["h1", "h2"]);
   const [chosen, setChosen] = useState<string>();
   const comparing = hypotheses.filter((item) => visible.includes(item.id));
+  const selected = comparing.find((item) => item.id === chosen);
   return (
     <div className="preview-history">
       <fieldset className="arena-selection">
@@ -28,12 +25,14 @@ export function HypothesisArena({ navigate }: { navigate: NavigatePreview }) {
                     ? [...items, item.id]
                     : items.filter((id) => id !== item.id),
                 );
+                if (!active && chosen === item.id) setChosen(undefined);
               }}
             />{" "}
             {item.title}
           </label>
         ))}
       </fieldset>
+      <DivergenceField visible={visible} chosen={selected?.id} />
       {comparing.length ? (
         <div className="arena-options">
           {comparing.map((item) => (
@@ -70,10 +69,9 @@ export function HypothesisArena({ navigate }: { navigate: NavigatePreview }) {
           Selecione hipóteses para montar a comparação.
         </p>
       )}
-      {chosen && (
+      {selected && (
         <p role="status" className="preview-message">
-          Escolhida neste cenário:{" "}
-          {hypotheses.find((item) => item.id === chosen)?.title}.
+          {selected.title} foi escolhida para revisão nesta simulação.
         </p>
       )}
       <PreviewLinks ids={["planner", "replay"]} navigate={navigate} />
@@ -87,50 +85,32 @@ export function TemporalReplay({ navigate }: { navigate: NavigatePreview }) {
   const left = replayEvents.find((item) => item.id === base)!;
   const right = replayEvents.find((item) => item.id === target)!;
   return (
-    <div className="preview-workbench">
-      <PreviewSection title="Momentos da fixture">
-        <ul className="preview-list">
-          {replayEvents.map((event) => (
-            <li key={event.id}>
-              <PreviewRow
-                title={event.label}
-                detail={"Conhecido em " + event.recorded}
-                active={target === event.id}
-                onClick={() => setTarget(event.id)}
-              />
-            </li>
-          ))}
-        </ul>
-      </PreviewSection>
-      <PreviewSection title="Comparação histórica">
-        <label className="preview-input">
-          <span>Comparar com</span>
-          <select
-            value={base}
-            onChange={(event) => setBase(event.target.value)}
-          >
-            {replayEvents.map((item) => (
-              <option value={item.id} key={item.id}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <p className="preview-detail-title">{right.label}</p>
-        <p className="preview-muted">
-          Vigente em {right.effective} · registrado em {right.recorded}
-        </p>
-        <p className="preview-muted">
-          <code>{left.revision}</code> → <code>{right.revision}</code>
-        </p>
-        {left.id === right.id && (
-          <p className="preview-message" role="status">
-            Os dois lados apontam para o mesmo momento.
-          </p>
-        )}
-        <TextComparison before={left.content} after={right.content} />
-        <PreviewLinks ids={["memory", "arena"]} navigate={navigate} />
-      </PreviewSection>
+    <div className="preview-history">
+      <Chronoscope base={base} target={target} onTarget={setTarget} />
+      <div className="preview-workbench replay-workbench">
+        <PreviewSection title="Comparação histórica">
+          <label className="preview-input">
+            <span>Comparar com</span>
+            <select
+              value={base}
+              onChange={(event) => setBase(event.target.value)}
+            >
+              {replayEvents.map((item) => (
+                <option value={item.id} key={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {left.id === right.id && (
+            <p className="preview-message" role="status">
+              Os dois lados apontam para o mesmo momento.
+            </p>
+          )}
+          <TextComparison before={left.content} after={right.content} />
+          <PreviewLinks ids={["memory", "arena"]} navigate={navigate} />
+        </PreviewSection>
+      </div>
     </div>
   );
 }

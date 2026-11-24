@@ -188,6 +188,7 @@ export const proposals = [
     title: "Priorizar sempre o arquivo vivo",
     source: "s2",
     conflict: "Conflita com a decisão vigente sobre fontes preservadas.",
+    conflictsWith: "m1",
     text: "Preferir a leitura da árvore atual para revisar cada nota.",
   },
   {
@@ -217,29 +218,6 @@ export const plannerSteps = [
     name: "Preparar revisão das alterações",
     condition: "Roteiro e fonte preservada selecionados",
     risk: "Revisão necessária",
-  },
-] as const;
-
-export const preflightChecks = [
-  {
-    id: "c1",
-    label: "Checkout identificado",
-    evidence: "Raiz e revisão conferidas no cenário.",
-  },
-  {
-    id: "c2",
-    label: "Fontes selecionadas",
-    evidence: "Roteiro e decisão disponíveis na fixture.",
-  },
-  {
-    id: "c3",
-    label: "Risco revisado",
-    evidence: "A comparação é apenas uma leitura.",
-  },
-  {
-    id: "c4",
-    label: "Destino revisado",
-    evidence: "O pacote demonstrativo fica nesta tela.",
   },
 ] as const;
 
@@ -276,6 +254,8 @@ export const replayEvents = [
     label: "Captura inicial",
     effective: "19 nov · 10:10",
     recorded: "19 nov · 10:14",
+    effectiveAt: "2026-11-19T10:10:00-03:00",
+    recordedAt: "2026-11-19T10:14:00-03:00",
     revision: "0f71bd0",
     content: "Política de continuidade\nConferir o roteiro antes de editar.\n",
   },
@@ -284,6 +264,8 @@ export const replayEvents = [
     label: "Prova vinculada",
     effective: "20 nov · 09:30",
     recorded: "20 nov · 09:42",
+    effectiveAt: "2026-11-20T09:30:00-03:00",
+    recordedAt: "2026-11-20T09:42:00-03:00",
     revision: "bf194dd",
     content:
       "Política de continuidade\nConferir o roteiro antes de editar.\nPreservar a fonte usada na decisão.\n",
@@ -293,6 +275,8 @@ export const replayEvents = [
     label: "Decisão revisada",
     effective: "22 nov · 13:11",
     recorded: "22 nov · 14:40",
+    effectiveAt: "2026-11-22T13:11:00-03:00",
+    recordedAt: "2026-11-22T14:40:00-03:00",
     revision: "dc62a51",
     content:
       "Política de continuidade\nConferir o roteiro e a origem da captura antes de editar.\nPreservar a fonte e o instante usados na decisão.\n",

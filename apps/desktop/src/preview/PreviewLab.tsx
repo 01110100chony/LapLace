@@ -1,5 +1,8 @@
-import { useEffect, useState } from "react";
-import { GraphTeaser } from "../graph/GraphTeaser";
+import { useEffect, useState, type RefObject } from "react";
+import type { Theme } from "../appearance";
+import { SpectralField } from "../SpectralField";
+import { LabThumb } from "./LabThumb";
+import "./instruments.css";
 import { previewDestinations, type PreviewId } from "../navigation";
 import { VisualIcon } from "../VisualIcon";
 import { EmptyState } from "../WorkView";
@@ -52,10 +55,16 @@ function Experiment({
   preview,
   navigate,
   focus,
+  theme,
+  paused,
+  spectralPhase,
 }: {
   preview: PreviewId;
   navigate: NavigatePreview;
   focus?: string;
+  theme: Theme;
+  paused: boolean;
+  spectralPhase: RefObject<number>;
 }) {
   const [request, setRequest] = useState({
     scenario: "ready" as Scenario,
@@ -122,11 +131,16 @@ function Experiment({
       <header className="surface-intro preview-heading">
         <div>
           <p className="eyebrow">
-            <VisualIcon name={entry.icon} />{" "}
-            {graph ? "Prévia · " + fixtureName : entry.group}
+            <VisualIcon name={entry.icon} /> Prévia · {fixtureName}
           </p>
           <h1>{entry.label}</h1>
         </div>
+        <SpectralField
+          theme={theme}
+          paused={paused}
+          phase={spectralPhase}
+          scene={preview}
+        />
         {scenarioControl}
       </header>
       <div className="preview-content" aria-busy={state.kind === "loading"}>
@@ -180,75 +194,91 @@ export default function PreviewLab({
   preview,
   focus,
   navigate,
-  index,
+  theme,
+  paused,
+  spectralPhase,
 }: {
   preview?: PreviewId;
   focus?: string;
   navigate: NavigatePreview;
-  index: () => void;
+  theme: Theme;
+  paused: boolean;
+  spectralPhase: RefObject<number>;
 }) {
   return (
     <div className="preview-lab">
-      {preview && preview !== "graph" && (
-        <div className="lab-status">
-          <span>
-            <VisualIcon name="lab" /> Prévia · dados de exemplo
-          </span>
-          {preview && (
-            <button type="button" className="text-button" onClick={index}>
-              Todas as experiências
-            </button>
-          )}
-        </div>
-      )}
       {preview ? (
         <Experiment
           key={preview + (focus ?? "")}
           preview={preview}
           focus={focus}
           navigate={navigate}
+          theme={theme}
+          paused={paused}
+          spectralPhase={spectralPhase}
         />
       ) : (
         <>
-          <header className="surface-intro lab-intro">
-            <h1>Laboratório</h1>
-            <span className="lab-mode">
+          <div className="lab-fixture-band">
+            <span>
               <VisualIcon name="lab" /> Prévia · dados de exemplo
             </span>
-          </header>
-          <div className="lab-layout">
-            <GraphTeaser preview onOpen={() => navigate("graph")} />
-            <div className="lab-index">
-              {groups.map((group) => (
-                <section key={group}>
-                  <h2>{group}</h2>
-                  <ul>
-                    {previewDestinations
-                      .filter(
-                        (item) => item.group === group && item.id !== "graph",
-                      )
-                      .map((item) => (
-                        <li key={item.id}>
-                          <button
-                            className="lab-destination"
-                            type="button"
-                            onClick={() => navigate(item.id)}
-                          >
-                            <span className="artifact-icon">
-                              <VisualIcon name={item.icon} />
-                            </span>
-                            <span>
-                              <strong>{item.label}</strong>
-                              <small>{experiences[item.id].description}</small>
-                            </span>
-                            <VisualIcon name="chevron" />
-                          </button>
-                        </li>
-                      ))}
-                  </ul>
-                </section>
-              ))}
+            <small>{fixtureName}</small>
+          </div>
+          <header className="lab-masthead">
+            <div>
+              <h1>Laboratório</h1>
+              <p>
+                Explore as experiências em um acervo demonstrativo, isolado dos
+                projetos locais.
+              </p>
             </div>
+            <SpectralField
+              theme={theme}
+              paused={paused}
+              phase={spectralPhase}
+              scene="lab"
+            />
+          </header>
+          <div className="lab-gallery-groups">
+            {groups.map((group) => (
+              <section
+                className="lab-gallery"
+                key={group}
+                aria-labelledby={group}
+              >
+                <h2 id={group}>{group}</h2>
+                <ul className="lab-specimen-grid">
+                  {previewDestinations
+                    .filter((item) => item.group === group)
+                    .map((item) => (
+                      <li key={item.id}>
+                        <button
+                          className="lab-specimen"
+                          type="button"
+                          onClick={() => navigate(item.id)}
+                        >
+                          <span className="lab-specimen-visual">
+                            <LabThumb id={item.id} />
+                          </span>
+                          <span className="lab-specimen-copy">
+                            <strong>
+                              <VisualIcon name={item.icon} /> {item.label}
+                            </strong>
+                            <small>{experiences[item.id].description}</small>
+                          </span>
+                          <span
+                            className="lab-specimen-foot"
+                            aria-hidden="true"
+                          >
+                            <VisualIcon name="forward" />
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                </ul>
+              </section>
+            ))}
           </div>
         </>
       )}

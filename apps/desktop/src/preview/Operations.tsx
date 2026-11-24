@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { preflightChecks, plannerSteps, proposals, sessions } from "./fixtures";
+import { memoryRecords, plannerSteps, proposals, sessions } from "./fixtures";
+import { AgentObservatory, GitTopology, Instrument } from "./Instruments";
 import {
   Evidence,
   PreviewLinks,
@@ -54,15 +55,7 @@ export function AgentCenter({ navigate }: { navigate: NavigatePreview }) {
         {active && (
           <>
             <p className="preview-detail-title">{active.title}</p>
-            <p className="preview-muted">
-              Tentativa {active.attempt} · {active.state} · executor
-              demonstrativo
-            </p>
-            <ol className="preview-events">
-              {active.events.map((event) => (
-                <li key={event}>{event}</li>
-              ))}
-            </ol>
+            <AgentObservatory session={active} />
             <p className="preview-reading">{active.result}</p>
             <Evidence id={active.source} />
             {active.state === "Em revisão" && (
@@ -92,7 +85,7 @@ type Review = "Aceita" | "Rejeitada";
 
 export function MemoryInbox({ navigate }: { navigate: NavigatePreview }) {
   const [filter, setFilter] = useState("A revisar");
-  const [selected, setSelected] = useState<string>(proposals[0].id);
+  const [selected, setSelected] = useState<string>(proposals[1].id);
   const [reviews, setReviews] = useState<Record<string, Review | undefined>>(
     {},
   );
@@ -102,6 +95,10 @@ export function MemoryInbox({ navigate }: { navigate: NavigatePreview }) {
       filter === "Todas" || (reviews[proposal.id] ?? "A revisar") === filter,
   );
   const active = items.find((item) => item.id === selected) ?? items[0];
+  const conflictingRecord =
+    active && "conflictsWith" in active
+      ? memoryRecords.find(({ id }) => id === active.conflictsWith)
+      : undefined;
 
   function review(id: string, decision: Review) {
     setReviews((current) => ({ ...current, [id]: decision }));
@@ -149,13 +146,40 @@ export function MemoryInbox({ navigate }: { navigate: NavigatePreview }) {
         {active && (
           <>
             <p className="preview-detail-title">{active.title}</p>
-            <p className="preview-reading">{active.text}</p>
-            {active.conflict && (
-              <p className="preview-warning">
-                <strong>Conflito</strong> · {active.conflict}
-              </p>
+            {conflictingRecord ? (
+              <Instrument
+                title="Comparação de conflito"
+                detail="Revisão humana"
+                className="conflict-instrument"
+              >
+                <div className="conflict-pair">
+                  <div>
+                    <h3>Proposta</h3>
+                    <p>{active.text}</p>
+                    <Evidence id={active.source} />
+                  </div>
+                  <div>
+                    <h3>
+                      Decisão vigente · v
+                      {conflictingRecord.revisions[0]?.version}
+                    </h3>
+                    <p>{conflictingRecord.revisions[0]?.content}</p>
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() => navigate("memory", conflictingRecord.id)}
+                    >
+                      Abrir revisão <VisualIcon name="forward" />
+                    </button>
+                  </div>
+                </div>
+              </Instrument>
+            ) : (
+              <>
+                <p className="preview-reading">{active.text}</p>
+                <Evidence id={active.source} />
+              </>
             )}
-            <Evidence id={active.source} />
             <div className="work-actions">
               <button
                 className="button primary"
@@ -222,6 +246,7 @@ export function GitPlanner({ navigate }: { navigate: NavigatePreview }) {
         </fieldset>
       </PreviewSection>
       <PreviewSection title="Precondições e revisão">
+        <GitTopology selected={steps} binding={binding} reviewed={review} />
         <label className="preview-control">
           <input
             type="checkbox"
@@ -264,44 +289,104 @@ export function GitPlanner({ navigate }: { navigate: NavigatePreview }) {
 }
 
 export function PreFlight({ navigate }: { navigate: NavigatePreview }) {
-  const [checked, setChecked] = useState<string[]>(["c1"]);
+  const [checkout, setCheckout] = useState<"confirmed" | "changed">(
+    "confirmed",
+  );
+  const [destination, setDestination] = useState<"local" | "external">("local");
+  const conditions = [
+    {
+      label: "Checkout",
+      value:
+        checkout === "confirmed"
+          ? "Base da fixture confirmada"
+          : "Base mudou desde a seleção",
+      ok: checkout === "confirmed",
+    },
+    { label: "Fontes", value: "Roteiro e decisão do acervo Atlas", ok: true },
+    { label: "Operação", value: "Leitura de evidências", ok: true },
+    {
+      label: "Destino",
+      value:
+        destination === "local" ? "Somente local" : "Externo sem autorização",
+      ok: destination === "local",
+    },
+  ];
+  const blocked = conditions.filter((condition) => !condition.ok);
   return (
     <div className="preview-workbench">
-      <PreviewSection title="Checklist de preparação">
-        <fieldset className="preview-checks">
-          <legend>Conferências da fixture</legend>
-          {preflightChecks.map((item) => (
-            <label key={item.id}>
-              <input
-                type="checkbox"
-                checked={checked.includes(item.id)}
-                onChange={(event) => {
-                  const value = event.target.checked;
-                  setChecked((current) =>
-                    value
-                      ? [...current, item.id]
-                      : current.filter((id) => id !== item.id),
-                  );
-                }}
-              />
-              <span>
-                <strong>{item.label}</strong>
-                <small>{item.evidence}</small>
-              </span>
-            </label>
-          ))}
-        </fieldset>
-      </PreviewSection>
-      <PreviewSection title="Prontidão da simulação">
-        <p className="preview-number">
-          {checked.length}/{preflightChecks.length} <small>conferências</small>
-        </p>
-        <p role="status" className="preview-message">
-          {checked.length === preflightChecks.length
-            ? "Cenário pronto para revisão."
-            : "Ainda há verificações pendentes."}
-        </p>
+      <PreviewSection title="Escopo do cenário">
+        <label className="preview-input">
+          <span>Estado do checkout</span>
+          <select
+            value={checkout}
+            onChange={(event) =>
+              setCheckout(
+                event.target.value === "changed" ? "changed" : "confirmed",
+              )
+            }
+          >
+            <option value="confirmed">Base confirmada</option>
+            <option value="changed">Base alterada</option>
+          </select>
+        </label>
+        <label className="preview-input">
+          <span>Destino</span>
+          <select
+            value={destination}
+            onChange={(event) =>
+              setDestination(
+                event.target.value === "external" ? "external" : "local",
+              )
+            }
+          >
+            <option value="local">Local</option>
+            <option value="external">Externo sem autorização</option>
+          </select>
+        </label>
         <Evidence id="s4" />
+      </PreviewSection>
+      <PreviewSection title="Precondições avaliadas">
+        <Instrument
+          title="Astrolábio de prontidão"
+          className="preflight-instrument"
+        >
+          <svg viewBox="0 0 176 176" aria-hidden="true">
+            <circle className="lv-orbit" cx="88" cy="88" r="78" />
+            <circle className="lv-orbit" cx="88" cy="88" r="51" />
+            <circle className="lv-hub" cx="88" cy="88" r="30" />
+            <text className="lv-lambda" x="88" y="98">
+              λ
+            </text>
+            {conditions.map((condition, index) => (
+              <path
+                key={condition.label}
+                className={condition.ok ? "lv-source" : "lv-warn"}
+                d="M96 16A72 72 0 0 1 160 80"
+                strokeWidth="6"
+                strokeLinecap="round"
+                transform={"rotate(" + index * 90 + " 88 88)"}
+              />
+            ))}
+          </svg>
+          <dl>
+            {conditions.map(({ label, value, ok }) => (
+              <div key={label} data-blocked={!ok}>
+                <dt>{label}</dt>
+                <dd>{value}</dd>
+              </div>
+            ))}
+          </dl>
+        </Instrument>
+        <p
+          role="status"
+          className={blocked.length ? "preview-warning" : "preview-message"}
+        >
+          {blocked.length
+            ? "Revisão bloqueada por " +
+              blocked.map(({ label }) => label.toLowerCase()).join(" e ") +
+              "."
+            : "Cenário pronto para revisão humana."}
+        </p>
         <PreviewLinks ids={["compiler", "planner"]} navigate={navigate} />
       </PreviewSection>
     </div>
