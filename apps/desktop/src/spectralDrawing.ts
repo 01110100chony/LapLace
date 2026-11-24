@@ -35,9 +35,26 @@ const lanes = Array.from({ length: strands }, (_, lane) => ({
 export function createSpectralDrawing(
   ctx: CanvasRenderingContext2D,
   theme: Theme,
+  landscape = false,
 ) {
   const colors = palettes[theme];
   const paths = new Float32Array(stride * strands);
+  // Cache the ridge geometry. Only its scale and the moving carrier change.
+  const contours = landscape
+    ? [true, false].map((warm) =>
+        Float32Array.from({ length: paths.length }, (_, index) => {
+          const depth = Math.floor(index / stride) / (strands - 1);
+          const q = columns[index % stride]!.q;
+          const crest = (warm ? 0.7 : 0.43) + depth * 0.15;
+          const ridge = Math.exp(-(((q - crest) / (warm ? 0.17 : 0.21)) ** 2));
+          return (
+            0.8 -
+            0.2 * depth -
+            ridge * (0.31 + 0.25 * Math.sin(depth * Math.PI))
+          );
+        }),
+      )
+    : undefined;
   let width = 0;
   let height = 0;
   let fades: CanvasGradient[] = [];
@@ -130,9 +147,20 @@ export function createSpectralDrawing(
         }
       }
 
+      const relief = contours?.[family];
+      if (relief) {
+        for (let i = 0; i < paths.length; i++) {
+          paths[i] = height * relief[i]! + 0.09 * paths[i]!;
+        }
+      }
+
       ctx.strokeStyle = fades[family]!;
       for (let lane = 0; lane < strands; lane++) {
-        trace(lane, lanes[lane]!.opacity, 0.65);
+        trace(
+          lane,
+          lanes[lane]!.opacity * (landscape ? 2.8 : 1),
+          landscape ? 0.95 : 0.65,
+        );
       }
       const core = warm ? 10 : 13;
       trace(core, theme === "Quartz" ? 0.05 : 0.1, 4.8);

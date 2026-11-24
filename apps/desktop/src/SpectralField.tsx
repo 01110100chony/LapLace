@@ -22,13 +22,15 @@ export function SpectralField({
     transition.current = 1;
   }, [scene]);
 
+  const landscape = scene === "workspace" || scene === "lab";
+
   useEffect(() => {
     const area = surface.current;
     const target = canvas.current;
     const ctx = target?.getContext("2d");
     if (!area || !target || !ctx) return;
 
-    const drawing = createSpectralDrawing(ctx, theme);
+    const drawing = createSpectralDrawing(ctx, theme, landscape);
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
     const pointer = { x: 0.5, y: 0.5, influence: 0 };
     let targetX = 0.5;
@@ -141,7 +143,7 @@ export function SpectralField({
       area.removeEventListener("pointermove", move);
       area.removeEventListener("pointerleave", leave);
     };
-  }, [theme, paused, phase]);
+  }, [theme, paused, phase, landscape]);
 
   return (
     <div ref={surface} className="spectral-field" aria-hidden="true">

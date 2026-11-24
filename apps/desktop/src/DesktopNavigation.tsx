@@ -15,6 +15,29 @@ const shortPreviewLabels: Partial<Record<PreviewId, string>> = {
   arena: "Hipóteses",
 };
 
+// A folded contour drawn in depth. Each line follows the same ridge at a
+// different elevation, so the paused frame keeps the shape of the field.
+const railContours = Array.from({ length: 19 }, (_, i) => {
+  const depth = i / 18;
+  const crest = 53 + depth * 48;
+  return `M-24 95 C12 94 ${crest - 27} ${27 - depth * 15} ${crest} ${28 - depth * 14}
+    S140 ${108 - depth * 58} 181 ${62 - depth * 16} S226 ${50 - depth * 35} 263 26`;
+});
+
+function RailField() {
+  return (
+    <div className="rail-field" aria-hidden="true">
+      <svg viewBox="0 0 240 96" preserveAspectRatio="none" focusable="false">
+        <g>
+          {railContours.map((d) => (
+            <path key={d} d={d} />
+          ))}
+        </g>
+      </svg>
+    </div>
+  );
+}
+
 export function DesktopNavigation({
   route,
   active,
@@ -115,6 +138,7 @@ export function DesktopNavigation({
       )}
 
       <div className="rail-foot">
+        <RailField />
         <div className="rail-system" role="status">
           <LambdaMark />
           <div>
