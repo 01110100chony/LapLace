@@ -124,3 +124,61 @@ export function searchKey(text: string) {
     .replace(/\p{Diacritic}/gu, "")
     .toLocaleLowerCase("pt-BR");
 }
+
+export type OrbitRing = { rx: number; ry: number };
+
+export function placeOnOrbits(
+  nodes: readonly GraphNode[],
+  edges: readonly GraphEdge[],
+): { nodes: readonly GraphNode[]; rings: readonly OrbitRing[] } {
+  if (!nodes.length) return { nodes, rings: [] };
+
+  const neighbors = new Map(nodes.map(({ id }) => [id, new Set<string>()]));
+  for (const { from, to } of edges) {
+    if (!neighbors.has(from) || !neighbors.has(to) || from === to) continue;
+    neighbors.get(from)?.add(to);
+    neighbors.get(to)?.add(from);
+  }
+
+  const degree = (node: GraphNode) => neighbors.get(node.id)?.size ?? 0;
+  const hub =
+    nodes.find(({ kind }) => kind === "project") ??
+    nodes.reduce((best, node) => (degree(node) > degree(best) ? node : best));
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const connected = [hub];
+  const visited = new Set([hub.id]);
+  for (const { id } of connected) {
+    for (const neighbor of neighbors.get(id) ?? []) {
+      if (visited.has(neighbor)) continue;
+      visited.add(neighbor);
+      connected.push(byId.get(neighbor)!);
+    }
+  }
+
+  const ordered = [
+    ...connected.slice(1),
+    ...nodes.filter(({ id }) => !visited.has(id)),
+  ];
+  const rings: OrbitRing[] = [];
+  const positions = new Map<string, Point>([[hub.id, { x: 0, y: 0 }]]);
+  let offset = 0;
+  while (offset < ordered.length) {
+    const level = rings.length + 1;
+    const ry = 154 * level;
+    const rx = ry * 1.45;
+    const batch = ordered.slice(offset, offset + 6 * level);
+    rings.push({ rx, ry });
+    batch.forEach(({ id }, index) => {
+      const phase = level % 2 === 0 ? 0.5 : 0;
+      const angle =
+        -Math.PI / 2 + (2 * Math.PI * (index + phase)) / batch.length;
+      positions.set(id, { x: rx * Math.cos(angle), y: ry * Math.sin(angle) });
+    });
+    offset += batch.length;
+  }
+
+  return {
+    nodes: nodes.map((node) => ({ ...node, ...positions.get(node.id)! })),
+    rings,
+  };
+}

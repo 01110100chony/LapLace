@@ -14,6 +14,7 @@ import {
 } from "./GraphCanvas";
 import {
   nodeKinds,
+  placeOnOrbits,
   searchKey,
   type GraphData,
   type GraphNode,
@@ -51,22 +52,31 @@ export function KGraph({
   data,
   tools,
   initialNode,
+  defaultLayout = "hierarchical",
   renderAction,
 }: {
   data: GraphData;
   tools?: ReactNode;
   initialNode?: string;
+  defaultLayout?: "hierarchical" | "orbital";
   renderAction: (node: GraphNode) => ReactNode;
 }) {
   const camera = useRef<GraphCamera>(null);
   const search = useRef<HTMLInputElement>(null);
   const filterMenu = useRef<HTMLDetailsElement>(null);
   const [view, setView] = useState<"canvas" | "list">("canvas");
+  const [layout, setLayout] = useState(defaultLayout);
+  const orbits = useMemo(
+    () =>
+      layout === "orbital" ? placeOnOrbits(data.nodes, data.edges) : undefined,
+    [data.nodes, data.edges, layout],
+  );
   const [sort, setSort] = useState<"kind" | "name">("kind");
   const [query, setQuery] = useState("");
   const [hiddenKinds, setHiddenKinds] = useState<readonly NodeKind[]>([]);
   const [hiddenRelations, setHiddenRelations] = useState<readonly string[]>([]);
-  const initial = data.nodes.find((node) => node.id === initialNode);
+  const positioned = orbits?.nodes ?? data.nodes;
+  const initial = positioned.find((node) => node.id === initialNode);
   const [selection, setSelection] = useState<GraphSelection | undefined>(
     initial && { kind: "node", id: initial.id },
   );
@@ -76,8 +86,8 @@ export function KGraph({
   const kinds = [...new Set(data.nodes.map((node) => node.kind))];
   const relationTypes = [...new Set(data.edges.map((edge) => edge.label))];
   const nodes = useMemo(
-    () => data.nodes.filter((node) => !hiddenKinds.includes(node.kind)),
-    [data, hiddenKinds],
+    () => positioned.filter((node) => !hiddenKinds.includes(node.kind)),
+    [positioned, hiddenKinds],
   );
   const edges = useMemo(
     () =>
@@ -288,13 +298,25 @@ export function KGraph({
           role="group"
           aria-label="Modo de visualização"
         >
-          <button
-            type="button"
-            aria-pressed={view === "canvas"}
-            onClick={() => setView("canvas")}
-          >
-            <VisualIcon name="graph" /> Canvas
-          </button>
+          {(
+            [
+              ["hierarchical", "Hierárquico", "layers"],
+              ["orbital", "Orbital", "graph"],
+            ] as const
+          ).map(([mode, label, icon]) => (
+            <button
+              key={mode}
+              type="button"
+              aria-pressed={view === "canvas" && layout === mode}
+              onClick={() => {
+                if (layout !== mode) setFocusRequest(undefined);
+                setLayout(mode);
+                setView("canvas");
+              }}
+            >
+              <VisualIcon name={icon} /> {label}
+            </button>
+          ))}
           <button
             type="button"
             aria-pressed={view === "list"}
@@ -319,6 +341,8 @@ export function KGraph({
             </div>
           )}
           <GraphCanvas
+            key={layout}
+            rings={orbits?.rings}
             nodes={nodes}
             edges={edges}
             selection={selection}

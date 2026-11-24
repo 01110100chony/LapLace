@@ -133,6 +133,7 @@ export function PreviewGraph({
     <KGraph
       data={isMedium ? medium : small}
       initialNode={focus}
+      defaultLayout="orbital"
       tools={tools}
       renderAction={(node) => {
         if (!node.target) return null;

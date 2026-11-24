@@ -20,6 +20,7 @@ import {
   zoomAt,
   type GraphEdge,
   type GraphNode,
+  type OrbitRing,
   type Point,
   type Size,
   type Viewport,
@@ -240,6 +241,7 @@ export function GraphCanvas({
   onClear,
   camera,
   hidden,
+  rings,
 }: {
   nodes: readonly GraphNode[];
   edges: readonly DrawnEdge[];
@@ -248,6 +250,7 @@ export function GraphCanvas({
   onClear: () => void;
   camera: Ref<GraphCamera>;
   hidden: boolean;
+  rings?: readonly OrbitRing[];
 }) {
   const stage = useRef<HTMLDivElement>(null);
   const world = useRef<HTMLDivElement>(null);
@@ -414,6 +417,7 @@ export function GraphCanvas({
       <div
         ref={stage}
         className="graph-stage"
+        data-layout={rings ? "orbital" : "hierarchical"}
         role="region"
         aria-label="Canvas do KGraph"
         aria-describedby="graph-keyboard"
@@ -425,6 +429,18 @@ export function GraphCanvas({
         onKeyDown={keyboard}
       >
         <div ref={world} className="graph-world">
+          {!!rings?.length && (
+            <svg
+              className="graph-orbits"
+              width="1"
+              height="1"
+              aria-hidden="true"
+            >
+              {rings.map(({ rx, ry }) => (
+                <ellipse key={rx} cx="0" cy="0" rx={rx} ry={ry} />
+              ))}
+            </svg>
+          )}
           <GraphOverlay
             nodes={nodes}
             edges={edges}

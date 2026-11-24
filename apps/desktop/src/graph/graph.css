@@ -677,3 +677,91 @@
 .graph-identifier:not([open]) summary {
   white-space: nowrap;
 }
+
+.graph-orbits {
+  position: absolute;
+  overflow: visible;
+  pointer-events: none;
+}
+.graph-orbits ellipse {
+  fill: none;
+  stroke: color-mix(in srgb, var(--graph-source) 34%, var(--outline));
+  stroke-dasharray: 3 6;
+  vector-effect: non-scaling-stroke;
+}
+.graph-stage[data-layout="orbital"]::before {
+  background:
+    radial-gradient(
+      ellipse at 50% 47%,
+      var(--graph-atmosphere),
+      transparent 70%
+    ),
+    linear-gradient(155deg, transparent 32%, var(--sheet));
+}
+.graph-stage[data-layout="orbital"] .graph-node-card {
+  --atlas-rim: color-mix(in srgb, var(--kind-tone) 56%, var(--outline));
+  isolation: isolate;
+  border-color: var(--atlas-rim);
+  background: color-mix(in srgb, var(--kind-tone) 7%, var(--panel));
+}
+.graph-stage[data-layout="orbital"] .graph-node-card[data-state="selected"] {
+  --atlas-rim: var(--kind-tone);
+  background: color-mix(in srgb, var(--kind-tone) 18%, var(--panel));
+}
+.graph-stage[data-layout="orbital"]
+  .graph-node-card:is([data-kind="project"], [data-kind="task"]) {
+  border-radius: 999px;
+  padding-inline: 13px;
+}
+.graph-stage[data-layout="orbital"] .graph-node-card[data-kind="decision"] {
+  --shape: polygon(
+    10px 0,
+    calc(100% - 10px) 0,
+    100% 10px,
+    100% calc(100% - 10px),
+    calc(100% - 10px) 100%,
+    10px 100%,
+    0 calc(100% - 10px),
+    0 10px
+  );
+}
+.graph-stage[data-layout="orbital"] .graph-node-card[data-kind="source"] {
+  --shape: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%);
+}
+.graph-stage[data-layout="orbital"]
+  .graph-node-card:is([data-kind="decision"], [data-kind="source"]) {
+  --plate: color-mix(in srgb, var(--kind-tone) 7%, var(--panel));
+  clip-path: var(--shape);
+  border: 0;
+  border-radius: 0;
+  background: var(--atlas-rim);
+}
+.graph-stage[data-layout="orbital"]
+  .graph-node-card:is([data-kind="decision"], [data-kind="source"])::before {
+  content: "";
+  position: absolute;
+  inset: 1px;
+  z-index: -1;
+  clip-path: var(--shape);
+  background: var(--plate);
+}
+.graph-stage[data-layout="orbital"]
+  .graph-node-card:is([data-kind="decision"], [data-kind="source"]):is(
+    [data-state="selected"],
+    :focus-visible
+  )::before {
+  --plate: color-mix(in srgb, var(--kind-tone) 19%, var(--panel));
+  inset: 3px;
+}
+.graph-stage[data-layout="orbital"] .graph-node-card:focus-visible {
+  --atlas-rim: var(--text);
+  outline-offset: -3px;
+}
+.graph-stage[data-layout="orbital"] .graph-node-card[data-kind="capture"] {
+  border-style: dashed;
+}
+.graph-stage[data-layout="orbital"]
+  .graph-node-card[data-kind="git"]
+  .graph-node-emblem {
+  border-radius: 50%;
+}

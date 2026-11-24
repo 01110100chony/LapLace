@@ -5,6 +5,7 @@ import {
   edgePath,
   fittedView,
   nodeSize,
+  placeOnOrbits,
   zoomAt,
   type GraphNode,
 } from "../src/graph/model.ts";
@@ -65,4 +66,53 @@ test("edge paths stop at node boundaries and preserve direction", () => {
   const to = node("proof", 300, 0);
   assert.match(edgePath(from, to).d, /^M90,0 .* 205,0$/);
   assert.match(edgePath(to, from).d, /^M210,0 .* 95,0$/);
+});
+
+test("orbital projection preserves node identity and prioritizes connected nodes", () => {
+  const project = { ...node("project", 42, 22), kind: "project" } as const;
+  const graph = [
+    project,
+    ...Array.from({ length: 7 }, (_, i) => node("detached-" + i, i, 0)),
+    node("evidence", 300, 600),
+  ];
+  const edges = [
+    {
+      id: "proof",
+      from: project.id,
+      to: "evidence",
+      label: "referencia",
+      origin: "fixture",
+    },
+    {
+      id: "missing",
+      from: "unknown",
+      to: "evidence",
+      label: "referencia",
+      origin: "fixture",
+    },
+  ];
+  const layout = placeOnOrbits(graph, edges);
+  assert.deepEqual(
+    layout.nodes.map(({ id }) => id),
+    graph.map(({ id }) => id),
+  );
+  assert.deepEqual(layout.nodes[0], { ...project, x: 0, y: 0 });
+  assert.equal(layout.nodes.at(-1)?.y, -layout.rings[0]!.ry);
+  assert.equal(project.x, 42);
+  assert.deepEqual(placeOnOrbits(graph, edges), layout);
+});
+
+test("the medium orbital fixture fits the camera without overlapping node cards", () => {
+  const graph = Array.from({ length: 75 }, (_, i) => node(String(i), i, 0));
+  const { nodes, rings } = placeOnOrbits(graph, []);
+  assert.equal(rings.length, 5);
+  for (const [i, current] of nodes.entries()) {
+    for (const other of nodes.slice(i + 1)) {
+      assert.ok(
+        Math.abs(current.x - other.x) >= nodeSize.width ||
+          Math.abs(current.y - other.y) >= nodeSize.height,
+        current.id + " overlaps " + other.id,
+      );
+    }
+  }
 });
